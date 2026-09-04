@@ -21,7 +21,7 @@ function render({ connected, version, groups }) {
     li.title = "Show this task group";
     li.addEventListener("click", async () => {
       try {
-        await chrome.runtime.sendMessage({ type: "taskwindow:focusGroup", name: g.name });
+        await chrome.runtime.sendMessage({ type: "taskwindow:focusGroup", name: g.name, token: g.token });
       } catch {}
       window.close(); // focusing the window closes the popover anyway
     });

@@ -58,7 +58,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // async response
   }
   if (msg?.type === "taskwindow:focusGroup") {
-    focusGroup(msg.name).then((ok) => sendResponse({ ok }));
+    focusGroup(msg.name, msg.token).then((ok) => sendResponse({ ok }));
     return true; // async response
   }
   if (msg?.type === "taskwindow:getSummary") {

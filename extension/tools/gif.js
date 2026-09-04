@@ -29,8 +29,8 @@ async function offscreenMessage(msg, attempt = 0) {
   }
 }
 
-export async function gifRecord({ tabId, duration, fps = 5, maxWidth = 800 }) {
-  const tab = await resolveTab(tabId);
+export async function gifRecord({ tabId, sessionToken, duration, fps = 5, maxWidth = 800 }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const interval = 1000 / fps;
   const maxFrames = 200;
 

@@ -96,6 +96,8 @@ async function main() {
   check(`all ${expected.length} tools exposed`, expected.length === 19 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
   const computer = tools.find((t) => t.name === "computer");
   check("computer schema has action enum", JSON.stringify(computer.inputSchema).includes("screenshot"));
+  const tabsCreate = tools.find((t) => t.name === "tabs_create");
+  check("tabs_create schema requires task", Array.isArray(tabsCreate.inputSchema.required) && tabsCreate.inputSchema.required.includes("task"));
 
   console.log("tools/call through the extension bridge:");
   const status = await client.callTool({ name: "taskwindow_status", arguments: {} });
@@ -111,6 +113,9 @@ async function main() {
 
   const nav = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other" } });
   check("navigate returns final url/title", !nav.isError && nav.content.at(-1).text.includes("Other"));
+
+  const noTask = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/" } });
+  check("tabs_create without task is rejected", noTask.isError === true && /task/i.test(noTask.content?.[0]?.text || ""));
 
   console.log("browser_batch:");
   const batch = await client.callTool({

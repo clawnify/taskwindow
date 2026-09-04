@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in the current task's tab group.");
+const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
+
+const sessionToken = z
+  .string()
+  .optional()
+  .describe(
+    "Session token returned by tabs_create — pass it in every browser tool call so the call acts only on your session's tabs (sessions are isolated from each other)."
+  );
 
 // Result contract with the extension: {text?, image?: {data, mimeType}, data?}.
 // The MCP layer turns `image` into an image content block and everything else
@@ -17,33 +24,41 @@ const toolDefs = [
   {
     name: "tabs_list",
     description:
-      "List the tabs the agent may use (id, title, URL, active state) — by default only the tabs it created, grouped by task. Always call this first to discover tab IDs.",
-    inputSchema: {},
+      "List the tabs in your session (id, title, URL, active state) — by default only the tabs it created, grouped by task. Pass the sessionToken returned by tabs_create.",
+    inputSchema: { sessionToken },
     timeoutMs: 10_000,
   },
   {
     name: "tabs_create",
     description:
-      "Open a new tab. Tabs live in a tab group named after the task they belong to (in the agent's own window); " +
-      "creating a tab for an existing task name reuses that group instead of duplicating it.",
+      "Open a new tab in a task-named tab group (in the agent's own window). Requires a \"task\" name saying what the group is about; " +
+      "same task name in the same session reuses that group. Returns a sessionToken — pass it as \"sessionToken\" in every subsequent " +
+      "browser tool call; concurrent agents' sessions never share tabs.",
     inputSchema: {
       url: z.string().url().describe("URL to open (include the scheme, e.g. https://...)"),
+      task: z
+        .string()
+        .min(1)
+        .describe('Task name for the tab group — required; says what the group is about, e.g. "Research competitors".'),
       active: z.boolean().optional().describe("Bring the new tab to the front (default true)"),
-      task: z.string().optional().describe("Task name for the tab group, e.g. \"Research competitors\". Reuses an existing group with the same name; defaults to the current task."),
+      sessionToken: z
+        .string()
+        .optional()
+        .describe("Your existing session token from an earlier tabs_create, to keep using that session's groups. Omit on your first call — a fresh token is minted and returned."),
     },
     timeoutMs: 15_000,
   },
   {
     name: "tabs_close",
     description: "Close a tab.",
-    inputSchema: { tabId },
+    inputSchema: { tabId, sessionToken },
     timeoutMs: 10_000,
   },
   {
     name: "navigate",
     description:
       "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title.",
-    inputSchema: { url: z.string().url(), tabId: tabId.optional() },
+    inputSchema: { url: z.string().url(), tabId: tabId.optional(), sessionToken },
     timeoutMs: 30_000,
   },
   {
@@ -69,6 +84,7 @@ const toolDefs = [
       dy: z.number().int().optional().describe("Vertical scroll delta in pixels (positive scrolls down)"),
       ms: z.number().int().min(0).max(10_000).optional().describe('Milliseconds for the "wait" action (max 10000)'),
       fullPage: z.boolean().optional().describe('For "screenshot": capture the whole scrollable page instead of the viewport'),
+      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -86,6 +102,7 @@ const toolDefs = [
       })).min(1).max(4).optional().describe("Sizes to render side by side, e.g. [{\"width\":390,\"height\":844},{\"width\":1280,\"height\":800}]. Omit to close the responsive view."),
       url: z.string().url().optional().describe("Page to render (defaults to the current tab's URL)"),
       tabId: tabId.optional(),
+      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -95,7 +112,7 @@ const toolDefs = [
       "Structured accessibility-style snapshot of the page: a text tree of interactive elements and content, " +
       "each labelled with a ref (e.g. e42) you can pass to form_input / file_upload. Cheaper and more reliable " +
       "than a screenshot for forms and navigation.",
-    inputSchema: { tabId: tabId.optional() },
+    inputSchema: { tabId: tabId.optional(), sessionToken },
     timeoutMs: 20_000,
   },
   {
@@ -103,7 +120,7 @@ const toolDefs = [
     description:
       "Find elements on the page matching a query (matches role, accessible name and visible text, case-insensitive). " +
       "Returns matching refs plus enough context to pick between them.",
-    inputSchema: { query: z.string().min(1), tabId: tabId.optional() },
+    inputSchema: { query: z.string().min(1), tabId: tabId.optional(), sessionToken },
     timeoutMs: 20_000,
   },
   {
@@ -112,6 +129,7 @@ const toolDefs = [
     inputSchema: {
       tabId: tabId.optional(),
       maxLength: z.number().int().min(100).max(500_000).optional().describe("Truncate output to this many characters (default 50000)"),
+      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -126,6 +144,7 @@ const toolDefs = [
       selector: z.string().optional().describe("CSS selector as fallback when no ref is available"),
       clear: z.boolean().optional().describe("Clear the field before typing (default true for text fields)"),
       tabId: tabId.optional(),
+      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -143,6 +162,7 @@ const toolDefs = [
       ref: z.string().optional(),
       selector: z.string().optional(),
       tabId: tabId.optional(),
+      sessionToken,
     },
     timeoutMs: 60_000,
   },
@@ -159,6 +179,7 @@ const toolDefs = [
       ref: z.string().optional(),
       selector: z.string().optional(),
       tabId: tabId.optional(),
+      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -171,6 +192,7 @@ const toolDefs = [
       code: z.string().describe("JavaScript source to evaluate, e.g. \"document.title\""),
       awaitPromise: z.boolean().optional().describe("Wait for a returned Promise to settle (default true)"),
       tabId: tabId.optional(),
+      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -184,6 +206,7 @@ const toolDefs = [
       pattern: z.string().optional().describe("Only messages matching this regular expression"),
       level: z.enum(["log", "info", "warning", "error"]).optional().describe("Minimum severity to include"),
       limit: z.number().int().min(1).max(1000).optional().describe("Max messages to return (default 200, newest last)"),
+      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -209,6 +232,7 @@ const toolDefs = [
         tool: z.string(),
         params: z.record(z.any()).optional().default({}),
       })).min(1).max(20),
+      sessionToken,
     },
     timeoutMs: 300_000,
   },
@@ -222,6 +246,7 @@ const toolDefs = [
       duration: z.number().min(0.5).max(30).describe("Seconds to record (max 30)"),
       fps: z.number().min(1).max(10).optional().describe("Frames per second (default 5)"),
       maxWidth: z.number().int().min(100).max(1280).optional().describe("Downscale frames to at most this width (default 800)"),
+      sessionToken,
     },
     timeoutMs: 180_000,
   },
@@ -234,7 +259,7 @@ const toolDefs = [
   {
     name: "shortcuts_execute",
     description: "Run a shortcut macro defined in the extension and return each action's result.",
-    inputSchema: { name: z.string().min(1) },
+    inputSchema: { name: z.string().min(1), sessionToken },
     timeoutMs: 120_000,
   },
 ];
@@ -291,7 +316,7 @@ export function registerTools(server, { bridge, version, logger = console }) {
   }
 }
 
-async function runBatch({ steps }, bridge, logger) {
+async function runBatch({ steps, sessionToken }, bridge, logger) {
   const results = [];
   for (let i = 0; i < steps.length; i++) {
     const { tool, params } = steps[i];
@@ -309,7 +334,7 @@ async function runBatch({ steps }, bridge, logger) {
     }
     try {
       const def = toolDefs.find((d) => d.name === tool);
-      const result = await bridge.sendTool(tool, params, def.timeoutMs);
+      const result = await bridge.sendTool(tool, { ...params, sessionToken }, def.timeoutMs);
       results.push({ step: i + 1, tool, ok: true, result });
     } catch (err) {
       logger.error(`[mcp] batch step ${i + 1} (${tool}) failed:`, err.message);

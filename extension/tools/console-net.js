@@ -3,8 +3,8 @@ import { withDebugger, getBuffers } from "./cdp.js";
 
 const LEVEL_ORDER = { log: 0, info: 1, warning: 2, error: 3 };
 
-export async function readConsoleMessages({ tabId, pattern, level, limit = 200 }) {
-  const tab = await resolveTab(tabId);
+export async function readConsoleMessages({ tabId, sessionToken, pattern, level, limit = 200 }) {
+  const tab = await resolveTab(tabId, sessionToken);
   await withDebugger(tab.id, async () => {}); // ensure capture domains are on
   const b = getBuffers(tab.id);
 
@@ -28,8 +28,8 @@ export async function readConsoleMessages({ tabId, pattern, level, limit = 200 }
   };
 }
 
-export async function readNetworkRequests({ tabId, pattern, limit = 200 }) {
-  const tab = await resolveTab(tabId);
+export async function readNetworkRequests({ tabId, sessionToken, pattern, limit = 200 }) {
+  const tab = await resolveTab(tabId, sessionToken);
   await withDebugger(tab.id, async () => {});
   const b = getBuffers(tab.id);
 

@@ -64,7 +64,7 @@ function readPngDimensions(b64) {
 
 export async function computer(params) {
   const { action } = params;
-  const tab = await resolveTab(params.tabId);
+  const tab = await resolveTab(params.tabId, params.sessionToken);
 
   if (action !== "screenshot" && action !== "wait") {
     // Visual "an agent is acting here" feedback, best-effort.

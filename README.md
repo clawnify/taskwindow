@@ -68,11 +68,14 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
 
 ## How the isolation works
 
-- **Task groups**: every tab the agent creates goes into a green tab group
-  named after the task, in the agent's own window. By default the agent can
-  only see and act on tabs in its own groups — never yours. You can click a
-  group in the toolbar popover to watch, and the user can widen access in
-  settings.
+- **Task groups & sessions**: every tab the agent creates goes into a green tab
+  group named after its task (`tabs_create` requires the task name — it says
+  what the group is about). Sessions are isolated from each other:
+  `tabs_create` returns a secret sessionToken and every browser tool call is
+  scoped to that session's groups, so concurrent agents never share tabs —
+  even when they pick the same task name. By default the agent can only see
+  and act on tabs in its own groups — never yours. You can click a group in
+  the toolbar popover to watch, and widen access in settings.
 - **Pairing**: the daemon listens on 127.0.0.1 only. During setup, the CLI gives
   the extension a short-lived, single-use code; the long-lived bearer token is
   returned only after the code is claimed. Manual codes are available with

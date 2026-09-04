@@ -34,7 +34,7 @@ export async function shortcutsList() {
   };
 }
 
-export async function shortcutsExecute({ name }, dispatch) {
+export async function shortcutsExecute({ name, sessionToken }, dispatch) {
   const registry = await load();
   const shortcut = registry[name];
   if (!shortcut) {
@@ -44,7 +44,7 @@ export async function shortcutsExecute({ name }, dispatch) {
   for (let i = 0; i < shortcut.actions.length; i++) {
     const { tool, params } = shortcut.actions[i];
     try {
-      const result = await dispatch(tool, params || {});
+      const result = await dispatch(tool, { ...(params || {}), sessionToken });
       results.push({ step: i + 1, tool, ok: true, result });
     } catch (err) {
       throw new Error(`shortcut "${name}" failed at step ${i + 1} (${tool}): ${err.message}`);

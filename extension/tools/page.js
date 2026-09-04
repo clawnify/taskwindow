@@ -24,8 +24,8 @@ async function pageOp(tabId, op, params) {
   return response;
 }
 
-export async function readPage({ tabId } = {}) {
-  const tab = await resolveTab(tabId);
+export async function readPage({ tabId, sessionToken } = {}) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "read_page", {});
   return {
     text: `${tab.url ? `# ${tab.title || tab.url}\n` : ""}${res.text}`,
@@ -33,8 +33,8 @@ export async function readPage({ tabId } = {}) {
   };
 }
 
-export async function find({ query, tabId }) {
-  const tab = await resolveTab(tabId);
+export async function find({ query, tabId, sessionToken }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "find", { query });
   return {
     text: res.matches.length
@@ -44,26 +44,26 @@ export async function find({ query, tabId }) {
   };
 }
 
-export async function getPageText({ tabId, maxLength = 50_000 }) {
-  const tab = await resolveTab(tabId);
+export async function getPageText({ tabId, sessionToken, maxLength = 50_000 }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "get_page_text", { maxLength });
   return { text: res.text };
 }
 
-export async function formInput({ value, ref, selector, clear, tabId }) {
-  const tab = await resolveTab(tabId);
+export async function formInput({ value, ref, selector, clear, tabId, sessionToken }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "form_input", { value, ref, selector, clear });
   return { data: res.result, text: res.summary || `set ${res.result?.target || "field"} to ${JSON.stringify(value)}` };
 }
 
-export async function fileUpload({ files, ref, selector, tabId }) {
-  const tab = await resolveTab(tabId);
+export async function fileUpload({ files, ref, selector, tabId, sessionToken }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "file_upload", { files, ref, selector });
   return { data: res.result, text: `attached ${res.result?.names?.join(", ") || "file(s)"} to ${res.result?.target || "file input"}` };
 }
 
-export async function uploadImage({ data, mimeType = "image/png", name = "image.png", ref, selector, tabId }) {
-  const tab = await resolveTab(tabId);
+export async function uploadImage({ data, mimeType = "image/png", name = "image.png", ref, selector, tabId, sessionToken }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "upload_image", { data, mimeType, name, ref, selector });
   return { data: res.result, text: res.summary || "image pushed into the page" };
 }

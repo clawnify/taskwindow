@@ -1,7 +1,7 @@
 import { resolveTab } from "./tabs.js";
 
-export async function javascriptExecute({ code, awaitPromise = true, world = "MAIN", tabId }) {
-  const tab = await resolveTab(tabId);
+export async function javascriptExecute({ code, awaitPromise = true, world = "MAIN", tabId, sessionToken }) {
+  const tab = await resolveTab(tabId, sessionToken);
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: world === "ISOLATED" ? "ISOLATED" : "MAIN",

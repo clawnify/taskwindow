@@ -11,10 +11,10 @@
  *
  * Clearing closes the harness window, fallback windows and the DNR rules.
  */
-import { resolveTab, ensureTaskGroup, currentTaskName, DEFAULT_TASK } from "./tabs.js";
+import { resolveTab, ensureTaskGroup, currentTaskName, normalizeToken } from "./tabs.js";
 import { ensureAttached, send } from "./cdp.js";
 
-const SESSION_KEY = "responsiveSession";
+const SESSION_KEY = "responsiveSession"; // per-agent-session suffix below
 const DNR_RULE_ID = 1;
 const HARNESS_MARKER = "responsive.html";
 
@@ -39,16 +39,22 @@ async function removeDnrRule() {
   } catch {}
 }
 
-async function loadSession() {
-  const stored = await chrome.storage.local.get(SESSION_KEY);
-  const s = stored[SESSION_KEY];
+function sessionKey(token) {
+  return token ? `${SESSION_KEY}:${token}` : SESSION_KEY;
+}
+
+async function loadSession(token) {
+  const key = sessionKey(token);
+  const stored = await chrome.storage.local.get(key);
+  const s = stored[key];
   if (!s) return null;
   try {
     await chrome.windows.get(s.windowId);
     await chrome.tabs.get(s.tabId);
     return s;
   } catch {
-    return null; // the user closed the harness window
+    await chrome.storage.local.remove(key); // the user closed the harness window
+    return null;
   }
 }
 
@@ -81,14 +87,14 @@ async function assertFrames(tabId, viewports) {
   }
 }
 
-async function openFallbackWindow(url, v, taskName) {
+async function openFallbackWindow(url, v, taskName, token) {
   // Top-level navigation: framing rules don't apply. The Emulation override
   // pins the page viewport to exactly width×height even though Chrome clamps
   // the window to its own minimum size.
   const win = await chrome.windows.create({ url, width: v.width, height: v.height + 130, focused: false });
   const ftab = win.tabs?.[0];
   if (!ftab) throw new Error("window was created but Chrome returned no tab");
-  await ensureTaskGroup(ftab.id, taskName);
+  await ensureTaskGroup(ftab.id, taskName, token);
   await ensureAttached(ftab.id);
   await send(ftab.id, "Emulation.setDeviceMetricsOverride", {
     width: v.width,
@@ -100,9 +106,10 @@ async function openFallbackWindow(url, v, taskName) {
   return { windowId: win.id, tabId: ftab.id };
 }
 
-export async function setViewport({ viewports, url, tabId } = {}) {
+export async function setViewport({ viewports, url, tabId, sessionToken } = {}) {
+  const token = normalizeToken(sessionToken) || crypto.randomUUID();
   if (!viewports?.length) {
-    const s = await loadSession();
+    const s = await loadSession(token);
     await removeDnrRule();
     if (!s) return { text: "no responsive view is open (it may have been closed already)" };
     for (const f of s.fallbacks || []) {
@@ -113,16 +120,19 @@ export async function setViewport({ viewports, url, tabId } = {}) {
     try {
       await chrome.windows.remove(s.windowId);
     } catch {}
-    await chrome.storage.local.remove(SESSION_KEY);
+    await chrome.storage.local.remove(sessionKey(token));
     return { text: "closed the responsive view" };
   }
 
   const vps = viewports.map((v) => ({ width: v.width, height: v.height }));
-  const src = await resolveTab(tabId);
+  const src = await resolveTab(tabId, token);
   const targetUrl = url || src.url || src.pendingUrl || "about:blank";
-  const taskName = (await currentTaskName()) || DEFAULT_TASK;
+  const taskName = await currentTaskName(token);
+  if (!taskName) {
+    throw new Error("No task in this session yet — use tabs_create (with a task name) to open a tab first.");
+  }
 
-  let s = await loadSession();
+  let s = await loadSession(token);
   if (!s) {
     const totalW = vps.reduce((a, v) => a + v.width, 0) + 48 * (vps.length + 1);
     const maxH = Math.max(...vps.map((v) => v.height)) + 90;
@@ -137,9 +147,9 @@ export async function setViewport({ viewports, url, tabId } = {}) {
     });
     const htab = win.tabs?.[0];
     if (!htab) throw new Error("window was created but Chrome returned no tab");
-    await ensureTaskGroup(htab.id, taskName);
+    await ensureTaskGroup(htab.id, taskName, token);
     s = { windowId: win.id, tabId: htab.id, url: targetUrl, viewports: vps, fallbacks: [] };
-    await chrome.storage.local.set({ [SESSION_KEY]: s });
+    await chrome.storage.local.set({ [sessionKey(token)]: s });
   }
 
   // Frames may be blocked by the site's framing headers; strip them for this
@@ -155,7 +165,7 @@ export async function setViewport({ viewports, url, tabId } = {}) {
   // top-level window — framing rules can't block a top-level navigation.
   for (const r of results) {
     if (r.mode !== "failed") continue;
-    const fb = await openFallbackWindow(s.url, r, taskName);
+    const fb = await openFallbackWindow(s.url, r, taskName, token);
     s.fallbacks = s.fallbacks || [];
     s.fallbacks.push({ windowId: fb.windowId, tabId: fb.tabId, width: r.width, height: r.height });
     r.mode = "emulated window";
@@ -164,7 +174,7 @@ export async function setViewport({ viewports, url, tabId } = {}) {
     r.pageHeight = r.height;
     r.touch = 5;
   }
-  await chrome.storage.local.set({ [SESSION_KEY]: s });
+  await chrome.storage.local.set({ [sessionKey(token)]: s });
 
   const lines = results.map(
     (r) => `${r.width}×${r.height} via ${r.mode} — page sees ${r.pageWidth}×${r.pageHeight}, maxTouchPoints=${r.touch}${r.tabId ? ` (tab ${r.tabId})` : ""}`
