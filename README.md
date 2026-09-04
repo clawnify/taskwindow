@@ -32,6 +32,9 @@ restart — no terminal needed) and prints:
 Keep the pairing code for step 3. (Prefer running it by hand? `npx taskwindow`
 in a terminal works too — it just won't survive a restart.)
 
+The installer also asks which coding agents should use TaskWindow. Choose one
+or more, or choose **None** to set them up later in step 4.
+
 ### 2. Install the Chrome extension
 
 You already have the CLI — add the extension:
@@ -42,9 +45,9 @@ taskwindow install --extension
 
 That downloads the latest release, unpacks it, opens Chrome at
 `chrome://extensions`, and prints the last 3 clicks (Developer mode →
-Load unpacked → select the printed folder). Chrome's own policy requires
-those clicks — no tool can do them for you. A Web Store listing (one-click
-install + auto-updates) is planned.
+Load unpacked → select the visible `TaskWindow Extension` folder in your home
+directory). Chrome's own policy requires those clicks — no tool can do them
+for you. A Web Store listing (one-click install + auto-updates) is planned.
 
 ### 3. Pair the extension with the daemon
 

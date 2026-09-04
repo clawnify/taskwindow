@@ -106,7 +106,10 @@ WantedBy=default.target
  * command does everything else.
  */
 export function installExtension(zipPath) {
-  const extDir = join(homedir(), ".taskwindow", "extension");
+  // This folder must remain visible in macOS's file picker: Chrome asks the
+  // user to select it after clicking "Load unpacked", and Finder hides paths
+  // whose names begin with a period by default.
+  const extDir = join(homedir(), "TaskWindow Extension");
   const open = (u) => {
     try {
       execSync(`open -a "Google Chrome" "${u}"`);

@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
 import { registerClaude, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
-import { createInterface } from "node:readline";
+import { clearLine, cursorTo, emitKeypressEvents, moveCursor } from "node:readline";
 
 // One-time pairing: the daemon prints a short code at startup; the extension
 // exchanges it for the real token via POST /pair (loopback-only). This defends
@@ -21,17 +21,83 @@ const pairCode = Array.from(randomBytes(6))
   .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
   .join("");
 
-// `taskwindow install` manages the login service and — only with an explicit
-// per-agent flag — registers the MCP server in that agent.
+// `taskwindow install` manages the login service and offers to register the
+// MCP server with one or more coding agents. Component-only installs do not
+// reopen the interactive picker.
 const args = process.argv.slice(2);
 const verb = args[0];
 const flags = args.slice(1);
 
 const AGENT_CHOICES = [
-  ["1", "Claude Code", registerClaude],
-  ["2", "Cursor", registerCursor],
-  ["3", "OpenCode", registerOpenCode],
+  ["Claude Code", registerClaude],
+  ["Cursor", registerCursor],
+  ["OpenCode", registerOpenCode],
 ];
+
+function selectCodingAgents() {
+  const choices = [...AGENT_CHOICES.map(([label]) => label), "None (set up later)"];
+  const noneIndex = choices.length - 1;
+  const selected = new Set([noneIndex]);
+  let focused = 0;
+  let rendered = false;
+
+  emitKeypressEvents(process.stdin);
+  const wasRaw = process.stdin.isRaw;
+  const wasPaused = process.stdin.isPaused();
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  const render = () => {
+    if (rendered) moveCursor(process.stdout, 0, -choices.length);
+    for (const [index, label] of choices.entries()) {
+      cursorTo(process.stdout, 0);
+      clearLine(process.stdout, 0);
+      const pointer = index === focused ? ">" : " ";
+      const checkbox = selected.has(index) ? "[x]" : "[ ]";
+      process.stdout.write(`${pointer} ${checkbox} ${label}\n`);
+    }
+    rendered = true;
+  };
+
+  return new Promise((resolve) => {
+    const finish = () => {
+      process.stdin.off("keypress", onKeypress);
+      process.stdin.setRawMode(wasRaw);
+      if (wasPaused) process.stdin.pause();
+      resolve([...selected].filter((index) => index !== noneIndex));
+    };
+
+    const onKeypress = (_character, key) => {
+      if (key?.ctrl && key.name === "c") {
+        process.stdin.setRawMode(wasRaw);
+        process.stdout.write("\n");
+        process.exit(130);
+      }
+      if (key?.name === "up") focused = (focused - 1 + choices.length) % choices.length;
+      else if (key?.name === "down") focused = (focused + 1) % choices.length;
+      else if (key?.name === "space") {
+        if (focused === noneIndex) {
+          selected.clear();
+          selected.add(noneIndex);
+        } else {
+          selected.delete(noneIndex);
+          if (selected.has(focused)) selected.delete(focused);
+          else selected.add(focused);
+          if (selected.size === 0) selected.add(noneIndex);
+        }
+      } else if (key?.name === "return" || key?.name === "enter") {
+        finish();
+        return;
+      } else {
+        return;
+      }
+      render();
+    };
+
+    process.stdin.on("keypress", onKeypress);
+    render();
+  });
+}
 
 async function pickAndRegisterAgents(config) {
   if (!process.stdin.isTTY) {
@@ -39,19 +105,20 @@ async function pickAndRegisterAgents(config) {
     return;
   }
   console.log("Which coding agents should use TaskWindow?");
-  for (const [num, label] of AGENT_CHOICES) console.log(`  ${num}. ${label}`);
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await new Promise((resolve) => rl.question("Enter numbers separated by commas (empty to skip): ", resolve));
-  rl.close();
+  console.log("Use ↑/↓ to move, space to select, and enter to confirm.");
+  const picks = await selectCodingAgents();
+  if (picks.length === 0) {
+    console.log("[taskwindow] skipped coding-agent setup — add one later with taskwindow install --claude|--cursor|--opencode");
+    return;
+  }
   const registered = [];
-  for (const pick of answer.split(",").map((x) => x.trim()).filter(Boolean)) {
-    const choice = AGENT_CHOICES.find(([num]) => num === pick);
-    if (!choice) continue;
+  for (const index of picks) {
+    const [label, register] = AGENT_CHOICES[index];
     try {
-      await choice[2](config);
-      registered.push(choice[1]);
+      await register(config);
+      registered.push(label);
     } catch (err) {
-      console.error(`[taskwindow] ${choice[1]} registration failed:`, err.message);
+      console.error(`[taskwindow] ${label} registration failed:`, err.message);
     }
   }
   console.log(
@@ -75,7 +142,7 @@ try {
       if (flags.includes("--claude")) registerClaude(config);
       if (flags.includes("--cursor")) registerCursor(config);
       if (flags.includes("--opencode")) registerOpenCode(config);
-    } else {
+    } else if (extFlag === -1) {
       await pickAndRegisterAgents(config);
     }
     process.exit(0);
