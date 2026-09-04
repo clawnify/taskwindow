@@ -62,6 +62,22 @@ taskwindow install --claude   # Claude Code
 taskwindow install --cursor   # Cursor
 ```
 
+**OpenCode** — add to `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "taskwindow": {
+      "type": "remote",
+      "url": "http://127.0.0.1:9377/mcp",
+      "enabled": true,
+      "headers": { "Authorization": "Bearer <token from ~/.taskwindow/token>" }
+    }
+  }
+}
+```
+
 Nothing is registered for agents you don't name. For anything else, the
 config is an HTTP MCP server at `http://127.0.0.1:9377/mcp` with header
 `Authorization: Bearer <token>` (the token is in `~/.taskwindow/token`).
