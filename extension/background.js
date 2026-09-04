@@ -9,7 +9,7 @@ import { shortcutsList, shortcutsExecute } from "./tools/shortcuts.js";
 import { connectWs, isConnected } from "./tools/connection.js";
 import { initGroupReaper } from "./tools/tabs.js";
 
-const VERSION = "0.1.0";
+const VERSION = chrome.runtime.getManifest().version;
 
 const HANDLERS = {
   tabs_list: tabsList,

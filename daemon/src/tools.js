@@ -8,6 +8,13 @@ const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the 
 
 const toolDefs = [
   {
+    name: "taskwindow_status",
+    description:
+      "Check whether the local TaskWindow daemon and Chrome extension are ready. Call this when browser tools report a connection problem; it returns the exact recovery action without requiring the extension.",
+    inputSchema: {},
+    local: true,
+  },
+  {
     name: "tabs_list",
     description:
       "List the tabs the agent may use (id, title, URL, active state) — by default only the tabs it created, grouped by task. Always call this first to discover tab IDs.",
@@ -232,7 +239,7 @@ const toolDefs = [
   },
 ];
 
-const toolNames = new Set(toolDefs.map((t) => t.name));
+const toolNames = new Set(toolDefs.filter((tool) => !tool.local).map((tool) => tool.name));
 
 function toMcpResult(result) {
   const content = [];
@@ -255,10 +262,24 @@ function toMcpResult(result) {
   return { content };
 }
 
-export function registerTools(server, { bridge, logger = console }) {
+export function registerTools(server, { bridge, version, logger = console }) {
   for (const def of toolDefs) {
     server.registerTool(def.name, { description: def.description, inputSchema: def.inputSchema }, async (args) => {
       try {
+        if (def.local) {
+          const connected = bridge.connected;
+          return toMcpResult({
+            data: {
+              daemon: "running",
+              daemonVersion: version,
+              extensionConnected: connected,
+              extensionVersion: bridge.lastHello?.version || null,
+              recovery: connected
+                ? null
+                : "Open Chrome and enable TaskWindow. If it remains disconnected, run `taskwindow doctor`, then `taskwindow pair`.",
+            },
+          });
+        }
         if (def.name === "browser_batch") return await runBatch(args, bridge, logger);
         const result = await bridge.sendTool(def.name, args, def.timeoutMs);
         return toMcpResult(result);

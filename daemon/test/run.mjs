@@ -88,6 +88,23 @@ try {
       console.error("  FAIL - expected clean not-connected error, got:", JSON.stringify(body).slice(0, 400));
       exitCode = 1;
     }
+
+    const statusRes = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "taskwindow_status", arguments: {} },
+      }),
+    });
+    const statusBody = await statusRes.json();
+    const statusText = statusBody?.result?.content?.[0]?.text || "";
+    if (statusBody?.result?.isError !== true && statusText.includes('"extensionConnected": false') && statusText.includes("taskwindow doctor")) {
+      console.log("  ok - status remains available with actionable recovery guidance");
+    } else {
+      console.error("  FAIL - expected disconnected status guidance, got:", JSON.stringify(statusBody).slice(0, 400));
+      exitCode = 1;
+    }
   }
 
   console.log("=== negative suite (flaky extension) ===");

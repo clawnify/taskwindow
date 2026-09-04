@@ -4,6 +4,7 @@
  * restarts.
  */
 import { ATTACHED, dropTabState } from "./cdp.js";
+import { claimInstallerBootstrap } from "./bootstrap.js";
 
 const DEFAULTS = { port: 9377, token: "" };
 
@@ -19,6 +20,10 @@ function broadcastStatus() {
 
 async function settings() {
   const stored = await chrome.storage.local.get(["port", "token"]);
+  if (!stored.token) {
+    const bootstrapped = await claimInstallerBootstrap();
+    if (bootstrapped) return bootstrapped;
+  }
   return {
     port: Number(stored.port) || DEFAULTS.port,
     token: stored.token || DEFAULTS.token,

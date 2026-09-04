@@ -5,10 +5,26 @@
  */
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { chmodSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
 
 const LABEL = "com.clawnify.taskwindow";
+const EXTENSION_DIRNAME = "TaskWindow Extension";
+const BOOTSTRAP_FILENAME = "taskwindow-bootstrap.json";
+
+export function extensionInstallDir(home = homedir()) {
+  return join(home, EXTENSION_DIRNAME);
+}
+
+export function extensionBootstrapPath(home = homedir()) {
+  return join(extensionInstallDir(home), BOOTSTRAP_FILENAME);
+}
+
+export function removeExtensionBootstrap(home = homedir()) {
+  try {
+    unlinkSync(extensionBootstrapPath(home));
+  } catch {}
+}
 
 function nodePath() {
   return process.execPath;
@@ -105,14 +121,14 @@ WantedBy=default.target
  * programmatic unpacked installs, so a human does the final 3 clicks — the
  * command does everything else.
  */
-export function installExtension(zipPath) {
+export function installExtension(zipPath, { port, pairingCode } = {}) {
   // This folder must remain visible in macOS's file picker: Chrome asks the
   // user to select it after clicking "Load unpacked", and Finder hides paths
   // whose names begin with a period by default.
-  const extDir = join(homedir(), "TaskWindow Extension");
+  const extDir = extensionInstallDir();
   const open = (u) => {
     try {
-      execSync(`open -a "Google Chrome" "${u}"`);
+      execFileSync("open", ["-a", "Google Chrome", u]);
       return true;
     } catch {
       return false;
@@ -123,21 +139,27 @@ export function installExtension(zipPath) {
     // No zip given: fetch the latest release asset from GitHub.
     try {
       const api = "https://api.github.com/repos/clawnify/taskwindow/releases/latest";
-      const release = JSON.parse(execSync(`curl -sL "${api}"`, { maxBuffer: 20e6 }).toString());
+      const release = JSON.parse(execFileSync("curl", ["-sL", api], { maxBuffer: 20e6 }).toString());
       const asset = (release.assets || []).find((a) => a.name.startsWith("TaskWindow-extension-"));
       if (!asset) throw new Error("no extension asset in the latest release");
       zipPath = join(homedir(), ".taskwindow", asset.name);
-      execSync(`curl -sL -o "${zipPath}" "${asset.browser_download_url}"`);
+      execFileSync("curl", ["-sL", "-o", zipPath, asset.browser_download_url]);
       console.log(`[taskwindow] downloaded ${asset.name}`);
     } catch (err) {
-      console.error(`[taskwindow] couldn't download the extension zip (${err.message}).`);
-      console.error(`[taskwindow] download it from https://github.com/clawnify/taskwindow/releases and re-run with --extension <zip>`);
-      return;
+      throw new Error(
+        `couldn't download the extension zip (${err.message}). Download it from ` +
+          "https://github.com/clawnify/taskwindow/releases and re-run with --extension <zip>"
+      );
     }
   }
 
   mkdirSync(extDir, { recursive: true });
-  execSync(`unzip -oq "${zipPath}" -d "${extDir}"`);
+  execFileSync("unzip", ["-oq", zipPath, "-d", extDir]);
+  if (pairingCode && port) {
+    const bootstrapPath = extensionBootstrapPath();
+    writeFileSync(bootstrapPath, JSON.stringify({ code: pairingCode, port }, null, 2) + "\n", { mode: 0o600 });
+    chmodSync(bootstrapPath, 0o600);
+  }
   console.log(`[taskwindow] extension unpacked to ${extDir}`);
   if (open("chrome://extensions")) {
     console.log("[taskwindow] opened chrome://extensions in Chrome — finish in 3 clicks:");
@@ -146,7 +168,8 @@ export function installExtension(zipPath) {
   }
   console.log("  1. turn on Developer mode (top right)");
   console.log(`  2. click "Load unpacked" and select: ${extDir}`);
-  console.log("  3. done — the extension pairs itself from here (options page if it asks)");
+  console.log("  3. TaskWindow will connect automatically");
+  return extDir;
 }
 
 export function uninstallService() {

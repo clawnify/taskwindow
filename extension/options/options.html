@@ -31,13 +31,13 @@
     </div>
 
     <div class="card">
-      <label for="pairCode">Pair with daemon</label>
+      <label for="pairCode">Manual pairing</label>
       <input id="pairCode" placeholder="6-character pairing code" style="text-transform: uppercase;" autocomplete="off" />
       <button id="pair">Pair</button>
       <span id="pairStatus" style="margin-left: 0.5rem;"></span>
       <p class="hint">
-        The daemon prints a fresh pairing code each time it starts
-        (<code>[taskwindow] pairing code: XXXXXX</code>). Type it here once — no need to copy the token.
+        Normal setup connects automatically. For manual recovery, run <code>taskwindow pair</code>
+        and enter the one-time code here.
       </p>
 
       <label for="token" style="margin-top: 1.25rem;">Daemon token (manual — usually unnecessary)</label>
