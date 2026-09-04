@@ -12,79 +12,27 @@ MCP over HTTP.
 
 ## Setup (5 minutes)
 
-### 1. Install and start the daemon
-
-Requires Node 18+.
+Requires Node 18+ and Chrome/Chromium 116+.
 
 ```bash
 npm install -g taskwindow
 taskwindow install
 ```
 
-That installs a login service (the daemon starts now and after every laptop
-restart — no terminal needed) and prints:
+The guided installer:
 
-```
-[taskwindow] login service installed (~/Library/LaunchAgents/com.clawnify.taskwindow.plist)
-[taskwindow] pairing code: A6LU5X — enter it in the TaskWindow extension options
-```
+- shows a checkbox list of detected coding agents (choose any combination, or **None**);
+- installs the background daemon as a login service;
+- downloads the extension to the visible `TaskWindow Extension` folder in your home directory;
+- opens `chrome://extensions` and waits for a verified connection.
 
-Keep the pairing code for step 3. (Prefer running it by hand? `npx taskwindow`
-in a terminal works too — it just won't survive a restart.)
+In Chrome, turn on **Developer mode**, click **Load unpacked**, and choose the
+`TaskWindow Extension` folder. Chrome requires these two manual clicks for
+unpacked extensions. TaskWindow then pairs automatically with a short-lived,
+single-use setup code and the installer prints `ready ✓` only after Chrome is
+connected.
 
-The installer also asks which coding agents should use TaskWindow. Choose one
-or more, or choose **None** to set them up later in step 4.
-
-### 2. Install the Chrome extension
-
-You already have the CLI — add the extension:
-
-```bash
-taskwindow install --extension
-```
-
-That downloads the latest release, unpacks it, opens Chrome at
-`chrome://extensions`, and prints the last 3 clicks (Developer mode →
-Load unpacked → select the visible `TaskWindow Extension` folder in your home
-directory). Chrome's own policy requires those clicks — no tool can do them
-for you. A Web Store listing (one-click install + auto-updates) is planned.
-
-### 3. Pair the extension with the daemon
-
-1. Click the TaskWindow toolbar icon → **Settings**
-2. Type the 6-character pairing code from step 1 → **Pair**
-3. The dot turns green: connected ✓
-
-(Manual token paste also works — `~/.taskwindow/token`.)
-
-### 4. Connect your coding agent (one agent at a time, only when you ask)
-
-```bash
-taskwindow install --claude   # Claude Code (user scope: every repo)
-taskwindow install --cursor   # Cursor
-```
-
-**OpenCode** — add to `opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "taskwindow": {
-      "type": "remote",
-      "url": "http://127.0.0.1:9377/mcp",
-      "enabled": true,
-      "headers": { "Authorization": "Bearer <token from ~/.taskwindow/token>" }
-    }
-  }
-}
-```
-
-Nothing is registered for agents you don't name. For anything else, the
-config is an HTTP MCP server at `http://127.0.0.1:9377/mcp` with header
-`Authorization: Bearer <token>` (the token is in `~/.taskwindow/token`).
-
-### 5. Try it
+### Try it
 
 Ask your agent: *"Open example.com in a new tab and take a screenshot."*
 
@@ -92,10 +40,26 @@ A green tab group named after your task appears in its own window — that's
 the agent's workspace. Screenshot done. Now try:
 *"Find the sign-up link and read the page's headings."*
 
+### Repair and advanced commands
+
+```bash
+taskwindow doctor              # diagnose daemon, extension, versions, and agents
+taskwindow pair                # create a manual one-time pairing code
+taskwindow install --extension # repair or update only the extension
+taskwindow install --claude    # add Claude Code without repeating setup
+taskwindow install --cursor    # add Cursor without repeating setup
+taskwindow install --opencode  # add OpenCode without repeating setup
+```
+
+Use `taskwindow install --no-extension` to install only the daemon and selected
+agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
+`Authorization: Bearer <token>`; the token is stored in `~/.taskwindow/token`.
+
 ## What the agent gets
 
 | Area | Tools |
 |---|---|
+| Status | `taskwindow_status` (daemon/extension readiness and recovery guidance) |
 | Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate` |
 | See | `computer` (screenshot + click/type/key/scroll), `read_page`, `find`, `get_page_text` |
 | Act | `form_input`, `file_upload`, `upload_image`, `javascript_execute` |
@@ -109,9 +73,10 @@ the agent's workspace. Screenshot done. Now try:
   only see and act on tabs in its own groups — never yours. You can click a
   group in the toolbar popover to watch, and the user can widen access in
   settings.
-- **Pairing**: the daemon listens on 127.0.0.1 only; the extension pairs with
-  a 6-character code printed at daemon start. MCP requests require a bearer
-  token.
+- **Pairing**: the daemon listens on 127.0.0.1 only. During setup, the CLI gives
+  the extension a short-lived, single-use code; the long-lived bearer token is
+  returned only after the code is claimed. Manual codes are available with
+  `taskwindow pair`.
 - **Agent actions are visible**: a phantom cursor and glow show where the
   agent is acting; while it does, Chrome shows a
   *"started debugging this browser"* infobar — an unavoidable Chrome policy

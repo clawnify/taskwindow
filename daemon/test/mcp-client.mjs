@@ -47,6 +47,35 @@ async function main() {
   check("GET /health without token is allowed (loopback only)", health.status === 200 && healthBody.ok === true);
   check("health reports extension connected", healthBody.extensionConnected === true);
 
+  console.log("pairing:");
+  const unauthPairRequest = await fetch(`${BASE}/pair/request`, { method: "POST" });
+  check("pairing-code requests require daemon authentication", unauthPairRequest.status === 401);
+  const pairRequest = await fetch(`${BASE}/pair/request`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const pairRequestBody = await pairRequest.json();
+  check("authenticated clients can request a short-lived code", pairRequest.status === 200 && /^[A-Z2-9]{6}$/.test(pairRequestBody.code));
+  const badPair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: "WRONG2" }),
+  });
+  check("incorrect pairing codes are rejected", badPair.status === 403);
+  const goodPair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: pairRequestBody.code }),
+  });
+  const goodPairBody = await goodPair.json();
+  check("a valid pairing code exchanges for the daemon token", goodPair.status === 200 && goodPairBody.token === token);
+  const reusedPair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: pairRequestBody.code }),
+  });
+  check("pairing codes are single-use", reusedPair.status === 403);
+
   // --- MCP client -----------------------------------------------------------
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
@@ -57,17 +86,21 @@ async function main() {
   console.log("tools/list:");
   const { tools } = await client.listTools();
   const expected = [
+    "taskwindow_status",
     "tabs_list", "tabs_create", "tabs_close", "navigate", "computer", "read_page", "find",
     "get_page_text", "form_input", "file_upload", "upload_image", "javascript_execute",
     "read_console_messages", "read_network_requests", "browser_batch", "gif_record",
     "shortcuts_list", "shortcuts_execute",
   ];
   const got = tools.map((t) => t.name).sort();
-  check(`all ${expected.length} tools exposed`, expected.length === 18 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
+  check(`all ${expected.length} tools exposed`, expected.length === 19 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
   const computer = tools.find((t) => t.name === "computer");
   check("computer schema has action enum", JSON.stringify(computer.inputSchema).includes("screenshot"));
 
   console.log("tools/call through the extension bridge:");
+  const status = await client.callTool({ name: "taskwindow_status", arguments: {} });
+  check("status reports daemon and extension readiness", !status.isError && status.content[0].text.includes('"extensionConnected": true'));
+
   const tabs = await client.callTool({ name: "tabs_list", arguments: {} });
   check("tabs_list returns text", !tabs.isError && tabs.content[0].text.includes("example.com"));
   check("tabs_list returns data block", tabs.content.some((c) => c.type === "text" && c.text.includes("developer.mozilla.org")));

@@ -2,7 +2,7 @@ function render({ connected, version, groups }) {
   document.getElementById("dot").className = `dot ${connected ? "on" : "off"}`;
   document.getElementById("status").textContent = connected
     ? `Connected to the daemon (v${version})`
-    : "Not connected — is the daemon running?";
+    : "Not connected — open Settings to repair the connection.";
 
   const list = document.getElementById("groups");
   list.innerHTML = "";

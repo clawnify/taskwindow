@@ -10,7 +10,7 @@ import { registerTools } from "./tools.js";
 export function createMcpRequestHandler({ bridge, version, logger = console }) {
   return async function handleMcpRequest(req, res, parsedBody) {
     const server = new McpServer({ name: "taskwindow", version });
-    registerTools(server, { bridge, logger });
+    registerTools(server, { bridge, version, logger });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

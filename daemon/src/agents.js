@@ -6,8 +6,54 @@
  */
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+
+function commandExists(command) {
+  try {
+    execFileSync("which", [command], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function inspectAgents() {
+  const claudePath = join(homedir(), ".claude.json");
+  const cursorPath = join(homedir(), ".cursor", "mcp.json");
+  const openCodePath = join(homedir(), ".config", "opencode", "opencode.json");
+  const claude = readJson(claudePath);
+  const cursor = readJson(cursorPath);
+  const openCode = readJson(openCodePath);
+  return [
+    {
+      id: "claude",
+      label: "Claude Code",
+      detected: commandExists("claude") || existsSync(claudePath),
+      configured: !!claude.mcpServers?.taskwindow,
+    },
+    {
+      id: "cursor",
+      label: "Cursor",
+      detected: commandExists("cursor") || existsSync(join(homedir(), ".cursor")),
+      configured: !!cursor.mcpServers?.taskwindow,
+    },
+    {
+      id: "opencode",
+      label: "OpenCode",
+      detected: commandExists("opencode") || existsSync(join(homedir(), ".config", "opencode")),
+      configured: !!openCode.mcp?.taskwindow,
+    },
+  ];
+}
 
 export function registerClaude({ port, token }) {
   try {
