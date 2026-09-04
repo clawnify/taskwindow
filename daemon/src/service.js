@@ -20,6 +20,8 @@ export function installService(daemonEntryPath, port) {
   mkdirSync(join(homedir(), ".taskwindow"), { recursive: true });
 
   if (system === "darwin") {
+    const uid = process.getuid?.() ?? 501;
+    const labelTarget = `gui/${uid}/${LABEL}`;
     const plistPath = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,11 +41,33 @@ export function installService(daemonEntryPath, port) {
 </plist>
 `;
     writeFileSync(plistPath, plist);
-    const uid = process.getuid?.() ?? 501;
+
+    // Unload any previously loaded instance. launchd is asynchronous about
+    // bootout: bootstrap immediately after it fails with EIO, so wait until
+    // the label is really gone (up to 5s).
     try {
-      execSync(`launchctl bootout gui/${uid}/${LABEL} 2>/dev/null`, { shell: "/bin/bash" });
+      execSync(`launchctl bootout ${labelTarget} 2>/dev/null`);
     } catch {}
-    execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`);
+    const unloaded = () => {
+      try {
+        execSync(`launchctl print ${labelTarget}`, { stdio: "pipe" });
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const deadline = Date.now() + 5000;
+    while (!unloaded() && Date.now() < deadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, Date.now() + 300);
+    }
+    if (!unloaded()) {
+      throw new Error(`couldn't unload the previous service — run: launchctl bootout ${labelTarget}`);
+    }
+    try {
+      execSync(`launchctl bootstrap gui/${uid} "${plistPath}"`, { stdio: "pipe" });
+    } catch (err) {
+      throw new Error(`launchctl bootstrap failed (${err.status ?? "?"}) — try: launchctl bootout ${labelTarget}, then re-run`);
+    }
     console.log(`[taskwindow] login service installed (${plistPath})`);
     console.log(`[taskwindow] daemon starts at login, restarts on crash, logs to ${logPath}`);
     return;

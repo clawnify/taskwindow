@@ -61,28 +61,34 @@ async function pickAndRegisterAgents(config) {
   );
 }
 
-if (verb === "install") {
-  const config = loadConfig();
-  if (!flags.includes("--no-service")) {
-    installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+try {
+  if (verb === "install") {
+    const config = loadConfig();
+    if (!flags.includes("--no-service")) {
+      installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+    }
+    const extFlag = flags.indexOf("--extension");
+    if (extFlag !== -1) {
+      installExtension(flags[extFlag + 1] && !flags[extFlag + 1].startsWith("--") ? flags[extFlag + 1] : null);
+    }
+    if (flags.includes("--claude") || flags.includes("--cursor") || flags.includes("--opencode")) {
+      if (flags.includes("--claude")) registerClaude(config);
+      if (flags.includes("--cursor")) registerCursor(config);
+      if (flags.includes("--opencode")) registerOpenCode(config);
+    } else {
+      await pickAndRegisterAgents(config);
+    }
+    process.exit(0);
   }
-  const extFlag = flags.indexOf("--extension");
-  if (extFlag !== -1) {
-    installExtension(flags[extFlag + 1] && !flags[extFlag + 1].startsWith("--") ? flags[extFlag + 1] : null);
+  if (verb === "uninstall") {
+    if (!flags.includes("--keep-agents")) unregisterAgents({ port: 9377 });
+    if (!flags.includes("--no-service")) uninstallService();
+    process.exit(0);
   }
-  if (flags.includes("--claude") || flags.includes("--cursor") || flags.includes("--opencode")) {
-    if (flags.includes("--claude")) registerClaude(config);
-    if (flags.includes("--cursor")) registerCursor(config);
-    if (flags.includes("--opencode")) registerOpenCode(config);
-  } else {
-    await pickAndRegisterAgents(config);
-  }
-  process.exit(0);
-}
-if (verb === "uninstall") {
-  if (!flags.includes("--keep-agents")) unregisterAgents({ port: 9377 });
-  if (!flags.includes("--no-service")) uninstallService();
-  process.exit(0);
+} catch (err) {
+  console.error(`[taskwindow] ${verb || "install"} failed: ${err.message}`);
+  console.error(`[taskwindow] if the problem persists: taskwindow uninstall, then taskwindow install`);
+  process.exit(1);
 }
 
 const config = loadConfig();
