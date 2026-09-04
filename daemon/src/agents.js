@@ -45,6 +45,24 @@ export function registerCursor({ port, token }) {
   console.log(`[taskwindow] registered in Cursor (${path})`);
 }
 
+export function registerOpenCode({ port, token }) {
+  const path = join(homedir(), ".config", "opencode", "opencode.json");
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(path, "utf8"));
+  } catch {}
+  cfg.mcp = cfg.mcp || {};
+  cfg.mcp.taskwindow = {
+    type: "remote",
+    url: `http://127.0.0.1:${port}/mcp`,
+    enabled: true,
+    headers: { Authorization: `Bearer ${token}` },
+  };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
+  console.log(`[taskwindow] registered in OpenCode (${path})`);
+}
+
 export function unregisterAgents({ port }) {
   try {
     execFileSync("claude", ["mcp", "remove", "taskwindow"], { stdio: "ignore" });
