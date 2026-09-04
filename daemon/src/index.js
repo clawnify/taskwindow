@@ -6,6 +6,9 @@ import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
 import { installService, uninstallService } from "./service.js";
+import { createRequire } from "node:module";
+
+const { version: VERSION } = createRequire(import.meta.url)("../package.json");
 import { registerClaude, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
 import { createInterface } from "node:readline";
 
@@ -76,7 +79,7 @@ const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const pairCode = Array.from(randomBytes(6))
   .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
   .join("");
-const handleMcp = createMcpRequestHandler({ bridge });
+const handleMcp = createMcpRequestHandler({ bridge, version: VERSION });
 
 // One-time pairing: the daemon prints a short code at startup; the extension
 // exchanges it for the real token via POST /pair (loopback-only). This defends
@@ -127,7 +130,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/health") {
     sendJson(res, 200, {
       ok: true,
-      version: "0.1.0",
+      version: VERSION,
       extensionConnected: bridge.connected,
       port: config.port,
     });
