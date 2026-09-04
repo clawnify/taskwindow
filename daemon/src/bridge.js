@@ -107,6 +107,9 @@ export class Bridge {
         this.lastHello = msg;
         this.logger.log(`[bridge] extension connected (protocol ${msg.protocol}, ${msg.version || "?"}, ${msg.userAgent || "unknown chrome"})`);
         break;
+      case "ping":
+        ws.send(JSON.stringify({ type: "pong" }));
+        break;
       case "pong":
         break;
       case "tool_result": {

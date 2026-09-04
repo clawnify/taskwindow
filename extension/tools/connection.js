@@ -90,6 +90,12 @@ async function connect() {
   }
   ws = socket; // the active socket; handlers below close over their own `socket`
 
+  // Application-level ping: the pong delivered to onMessage resets the MV3
+  // service-worker idle timer, which transport-level pings don't.
+  const keepalive = setInterval(() => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "ping" }));
+  }, 20_000);
+
   socket.onopen = () => {
     backoff = 1000;
     connected = true;
@@ -116,6 +122,7 @@ async function connect() {
   };
 
   socket.onclose = () => {
+    clearInterval(keepalive);
     if (ws === socket) ws = null;
     if (connected) {
       connected = false;
