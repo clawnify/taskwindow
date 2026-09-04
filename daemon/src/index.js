@@ -1,9 +1,21 @@
 #!/usr/bin/env node
 import http from "node:http";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
+import { installService, uninstallService } from "./service.js";
+
+// `taskwindow install|uninstall` manage the login service, then exit.
+if (process.argv[2] === "install") {
+  installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+  process.exit(0);
+}
+if (process.argv[2] === "uninstall") {
+  uninstallService();
+  process.exit(0);
+}
 
 const config = loadConfig();
 const bridge = new Bridge({ token: config.token });

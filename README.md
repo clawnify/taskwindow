@@ -28,8 +28,15 @@ You'll see:
 [taskwindow] claude code: claude mcp add taskwindow --transport http http://127.0.0.1:9377/mcp --header "Authorization: Bearer …"
 ```
 
-Keep this terminal open (or run it as a login service) — the daemon is what
-your agent talks to.
+The daemon is what your agent talks to, so it needs to stay running.
+To make it survive laptop restarts (installs a login service):
+
+```bash
+npm install -g taskwindow
+taskwindow install
+```
+
+Or just keep `npx taskwindow` running in a terminal — both work.
 
 ### 2. Install the Chrome extension
 
