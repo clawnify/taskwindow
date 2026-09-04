@@ -1,97 +1,111 @@
 # TaskWindow
 
-A Chrome extension (MV3) + local daemon that lets **any MCP-speaking coding
-agent** drive your real, logged-in browser tab — the same capability as
-"Claude in Chrome", but not tied to one vendor's runtime.
+Let any coding agent drive your real, logged-in Chrome — the tabs you're
+already signed into — without touching the windows you're working in.
 
 ```
-[Agent, any vendor] --MCP (HTTP)--> [local daemon] --WebSocket--> [Chrome extension] --CDP--> [live tab]
+[coding agent] --MCP--> [TaskWindow daemon] --WebSocket--> [Chrome extension] --CDP--> [your tab]
 ```
 
-The extension attaches Chrome's debugger to your actual tab (your cookies,
-your session — not a spawned automation profile) and exposes 18 tools over
-MCP Streamable HTTP: tab management, screenshot + mouse/keyboard
-(`computer`), accessibility-tree snapshots (`read_page`/`find`), text
-extraction, form filling, file upload, in-page JS, console/network capture,
-`browser_batch`, GIF recording, and shortcuts.
+Works with Claude Code, Cursor, Windsurf, Codex, or any client that speaks
+MCP over HTTP.
 
-## Quickstart
+## Setup (5 minutes)
 
-**1. Run the daemon** (Node 18+):
+### 1. Start the daemon
+
+Requires Node 18+.
 
 ```bash
-cd daemon
-npm install
-npm start
-# [taskwindow] MCP endpoint: http://127.0.0.1:9377/mcp
-# [taskwindow] token: <printed on first run, also saved to ~/.taskwindow/token>
+npx taskwindow
 ```
 
-**2. Load the extension**: `chrome://extensions` → Developer mode → Load
-unpacked → select `extension/`. Then open the extension's **Options** page,
-paste the daemon token, and save. The status dot turns green when the
-extension connects to the daemon.
+You'll see:
 
-**3. Point your MCP client** at the endpoint, sending the token as a bearer
-header:
-
-```json
-{
-  "mcpServers": {
-    "taskwindow": {
-      "type": "http",
-      "url": "http://127.0.0.1:9377/mcp",
-      "headers": { "Authorization": "Bearer <token>" }
-    }
-  }
-}
+```
+[taskwindow] daemon listening on http://127.0.0.1:9377
+[taskwindow] pairing code: A6LU5X — enter it in the TaskWindow extension options
+[taskwindow] claude code: claude mcp add taskwindow --transport http http://127.0.0.1:9377/mcp --header "Authorization: Bearer …"
 ```
 
-Any MCP client works — Claude Code, Cursor, Windsurf, or a raw
-`tools/call` over HTTP. Verify with: *"List my tabs, then take a
-screenshot of the active one."*
+Keep this terminal open (or run it as a login service) — the daemon is what
+your agent talks to.
 
-## Tools
+### 2. Install the Chrome extension
 
-`tabs_list` · `tabs_create` · `tabs_close` · `navigate` · `computer`
-(screenshot, click, type, key, scroll) · `read_page` · `find` ·
-`get_page_text` · `form_input` · `file_upload` · `upload_image` ·
-`javascript_execute` · `read_console_messages` · `read_network_requests` ·
-`browser_batch` · `gif_record` · `shortcuts_list` · `shortcuts_execute`
+1. Download `TaskWindow-extension-*.zip` from the
+   [latest release](https://github.com/clawnify/taskwindow/releases) and unzip it
+2. Open `chrome://extensions`
+3. Enable **Developer mode** (top right)
+4. Click **Load unpacked** and select the unzipped folder
+5. Click the TaskWindow icon in the toolbar
 
-Shortcuts are editable macros (named sequences of tool actions) in the
-extension's options page.
+### 3. Pair the extension with the daemon
 
-## Security model
+1. Click the TaskWindow toolbar icon → **Settings**
+2. Type the 6-character pairing code from step 1 → **Pair**
+3. The dot turns green: connected ✓
 
-- The daemon binds **127.0.0.1 only**; every MCP request and the extension's
-  WebSocket handshake require a shared token (generated at
-  `~/.taskwindow/token`, `0600`).
-- Anything your agent can reach through the browser, it can act on — treat
-  MCP client access to this daemon as browser-level trust. `Authorization:
-  Bearer <token>` on every request.
-- While the `computer` tool is active Chrome shows an *"TaskWindow started
-  debugging this browser"* infobar. That's a Chrome policy for CDP-based
-  control; there is no way around it.
+(Manual token paste also works — `~/.taskwindow/token`.)
 
-## Known limits
+### 4. Connect your coding agent
 
-- Chrome/Chromium only (MV3 `chrome.*` APIs directly). Firefox needs
-  different CDP access — deferred.
-- Page-level tools (`read_page`, `form_input`, …) run in the top frame;
-  automation inside iframes is out of scope for now.
-- Native `alert()`/`confirm()` dialogs block the attached tab — avoid
-  triggering them.
-- Console/network capture covers the period the extension has been driving
-  the tab (CDP domains are enabled on attach).
+The daemon prints the ready-made command at startup. For Claude Code:
+
+```bash
+claude mcp add taskwindow --transport http http://127.0.0.1:9377/mcp \
+  --header "Authorization: Bearer <token from the daemon output>"
+```
+
+For other clients, the config is an HTTP MCP server at
+`http://127.0.0.1:9377/mcp` with header `Authorization: Bearer <token>`.
+
+### 5. Try it
+
+Ask your agent: *"Open example.com in a new tab and take a screenshot."*
+
+A green tab group named after your task appears in its own window — that's
+the agent's workspace. Screenshot done. Now try:
+*"Find the sign-up link and read the page's headings."*
+
+## What the agent gets
+
+| Area | Tools |
+|---|---|
+| Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate` |
+| See | `computer` (screenshot + click/type/key/scroll), `read_page`, `find`, `get_page_text` |
+| Act | `form_input`, `file_upload`, `upload_image`, `javascript_execute` |
+| Debug | `read_console_messages`, `read_network_requests` |
+| Efficiency | `browser_batch` (multi-step in one call), `gif_record`, `set_viewport` (responsive view), `shortcuts_*` |
+
+## How the isolation works
+
+- **Task groups**: every tab the agent creates goes into a green tab group
+  named after the task, in the agent's own window. By default the agent can
+  only see and act on tabs in its own groups — never yours. You can click a
+  group in the toolbar popover to watch, and the user can widen access in
+  settings.
+- **Pairing**: the daemon listens on 127.0.0.1 only; the extension pairs with
+  a 6-character code printed at daemon start. MCP requests require a bearer
+  token.
+- **Agent actions are visible**: a phantom cursor and glow show where the
+  agent is acting; while it does, Chrome shows a
+  *"started debugging this browser"* infobar — an unavoidable Chrome policy
+  for this capability, same as Claude's own extension.
+
+## Requirements & limits
+
+- Chrome/Chromium 116+ (Chrome, Edge, Brave, Arc…)
+- Node 18+ for the daemon
+- Page tools run in the top frame; native `alert()`/`confirm()` dialogs block
+  the attached tab
 
 ## Development
 
 ```bash
-cd daemon && npm test        # boots a daemon + fake extension + real MCP client, 24 checks
+git clone https://github.com/clawnify/taskwindow
+cd taskwindow/daemon && npm install && npm test
 ```
 
-The daemon is fully covered by an end-to-end harness (auth, tool dispatch,
-batch semantics, error paths). The extension's GIF encoder has a round-trip
-suite. The extension itself is syntax-checked and manifest-validated; load
-it in Chrome and drive a real tab for a manual end-to-end pass.
+The test suite boots the daemon with a fake extension and runs a real MCP
+client against it (auth, dispatch, batching, error paths).

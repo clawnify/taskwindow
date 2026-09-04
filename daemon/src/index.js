@@ -139,6 +139,8 @@ server.listen(config.port, "127.0.0.1", () => {
   console.log(`[taskwindow] daemon listening on http://127.0.0.1:${config.port}`);
   console.log(`[taskwindow] MCP endpoint: http://127.0.0.1:${config.port}/mcp`);
   console.log(`[taskwindow] pairing code: ${pairCode} — enter it in the TaskWindow extension options to connect (valid while this daemon runs)`);
+  console.log(`[taskwindow] your MCP client config: endpoint http://127.0.0.1:${config.port}/mcp, header "Authorization: Bearer ${config.token}"`);
+  console.log(`[taskwindow] claude code: claude mcp add taskwindow --transport http http://127.0.0.1:${config.port}/mcp --header "Authorization: Bearer ${config.token}"`);
   console.log(`[taskwindow] waiting for the TaskWindow extension to connect on ws://127.0.0.1:${config.port}/ws`);
 });
 
