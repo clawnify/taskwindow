@@ -6,29 +6,45 @@ import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
 import { installService, uninstallService } from "./service.js";
+import { registerClaude, registerCursor, unregisterAgents } from "./agents.js";
 
-// `taskwindow install|uninstall` manage the login service, then exit.
-if (process.argv[2] === "install") {
-  installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+// `taskwindow install` manages the login service and — only with an explicit
+// per-agent flag — registers the MCP server in that agent.
+const args = process.argv.slice(2);
+const verb = args[0];
+const flags = args.slice(1);
+
+if (verb === "install") {
+  const config = loadConfig();
+  if (!flags.includes("--no-service")) {
+    installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+  }
+  if (flags.includes("--claude")) registerClaude(config);
+  if (flags.includes("--cursor")) registerCursor(config);
+  if (flags.includes("--claude") || flags.includes("--cursor")) {
+    console.log(`[taskwindow] pairing code (if the extension asks): ${pairCode ?? "restart the daemon to see it"}`);
+  }
   process.exit(0);
 }
-if (process.argv[2] === "uninstall") {
-  uninstallService();
+if (verb === "uninstall") {
+  if (!flags.includes("--keep-agents")) unregisterAgents({ port: 9377 });
+  if (!flags.includes("--no-service")) uninstallService();
   process.exit(0);
 }
 
 const config = loadConfig();
 const bridge = new Bridge({ token: config.token });
+
+const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+const pairCode = Array.from(randomBytes(6))
+  .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
+  .join("");
 const handleMcp = createMcpRequestHandler({ bridge });
 
 // One-time pairing: the daemon prints a short code at startup; the extension
 // exchanges it for the real token via POST /pair (loopback-only). This defends
 // the pairing endpoint against other local user accounts; a same-user process
 // could read the token file directly, so the code adds no obstacle there.
-const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-const pairCode = Array.from(randomBytes(6))
-  .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
-  .join("");
 const pairFailures = []; // timestamps of failed attempts, rolling window
 const PAIR_WINDOW_MS = 60_000;
 const PAIR_MAX_FAILURES = 5;
@@ -152,7 +168,7 @@ server.listen(config.port, "127.0.0.1", () => {
   console.log(`[taskwindow] MCP endpoint: http://127.0.0.1:${config.port}/mcp`);
   console.log(`[taskwindow] pairing code: ${pairCode} — enter it in the TaskWindow extension options to connect (valid while this daemon runs)`);
   console.log(`[taskwindow] your MCP client config: endpoint http://127.0.0.1:${config.port}/mcp, header "Authorization: Bearer ${config.token}"`);
-  console.log(`[taskwindow] claude code: claude mcp add taskwindow --transport http http://127.0.0.1:${config.port}/mcp --header "Authorization: Bearer ${config.token}"`);
+  console.log(`[taskwindow] register an agent with: taskwindow install --claude (or --cursor)`);
   console.log(`[taskwindow] waiting for the TaskWindow extension to connect on ws://127.0.0.1:${config.port}/ws`);
 });
 
