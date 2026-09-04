@@ -17,14 +17,16 @@ export function registerClaude({ port, token }) {
   execFileSync(
     "claude",
     [
-      "mcp", "add", "taskwindow",
+      "mcp", "add",
       "--transport", "http",
+      "--scope", "user",
+      "taskwindow",
       `http://127.0.0.1:${port}/mcp`,
       "--header", `Authorization: Bearer ${token}`,
     ],
     { stdio: "inherit" }
   );
-  console.log("[taskwindow] registered in Claude Code — verify with: claude mcp list");
+  console.log("[taskwindow] registered in Claude Code (user scope: available in every repo)");
 }
 
 export function registerCursor({ port, token }) {
