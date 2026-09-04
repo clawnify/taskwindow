@@ -143,6 +143,10 @@ test("multi-frame animation: frame count, ordering, delay", () => {
 });
 
 test("macOS sips decodes the generated GIF (real-world decoder check)", () => {
+  if (process.platform !== "darwin") {
+    console.log("    skipped (sips is macOS-only)");
+    return;
+  }
   const { execFileSync } = require("node:child_process");
   const fs = require("node:fs");
   const w = 32, h = 32;

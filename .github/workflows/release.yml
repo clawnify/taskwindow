@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install daemon deps
+        run: npm ci
+        working-directory: daemon
+      - name: Daemon end-to-end tests (fake extension + real MCP client)
+        run: npm test
+        working-directory: daemon
+      - name: GIF encoder round-trip tests
+        run: node test/gif-encoder.test.mjs
+        working-directory: daemon
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package extension (loadable via chrome://extensions)
+        run: |
+          cd extension
+          zip -qr "../TaskWindow-extension-${GITHUB_REF_NAME}.zip" .
+      - name: Package daemon (npx-ready)
+        run: |
+          cp README.md daemon/README.md
+          cp LICENSE daemon/LICENSE
+          cd daemon
+          zip -qr "../TaskWindow-daemon-${GITHUB_REF_NAME}.zip" . -x "node_modules/*"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Install
+
+          **Extension** — unzip `TaskWindow-extension-*.zip`, then `chrome://extensions` → Developer mode → Load unpacked → select the unzipped folder.
+
+          **Daemon** — unzip `TaskWindow-daemon-*.zip`, then `npm install && npm start` inside it (Node 18+). Or `npx taskwindow` once the npm package is published.
+
+          Then pair: the daemon prints a 6-character pairing code at startup — enter it in the extension's options page. Point your MCP client at `http://127.0.0.1:9377/mcp` with the bearer token shown in the options page.
+
+          See the README for the full guide.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "TaskWindow-extension-${GITHUB_REF_NAME}.zip" \
+            "TaskWindow-daemon-${GITHUB_REF_NAME}.zip" \
+            --title "TaskWindow ${GITHUB_REF_NAME}" \
+            --notes-file notes.md
+      - name: Publish daemon to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        working-directory: daemon
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          npm publish --access public
