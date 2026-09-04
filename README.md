@@ -40,6 +40,8 @@ Or just keep `npx taskwindow` running in a terminal — both work.
 
 ### 2. Install the Chrome extension
 
+You already have the CLI — add the extension:
+
 ```bash
 taskwindow install --extension
 ```
