@@ -55,17 +55,16 @@ Or just keep `npx taskwindow` running in a terminal — both work.
 
 (Manual token paste also works — `~/.taskwindow/token`.)
 
-### 4. Connect your coding agent
-
-The daemon prints the ready-made command at startup. For Claude Code:
+### 4. Connect your coding agent (one agent at a time, only when you ask)
 
 ```bash
-claude mcp add taskwindow --transport http http://127.0.0.1:9377/mcp \
-  --header "Authorization: Bearer <token from the daemon output>"
+taskwindow install --claude   # Claude Code
+taskwindow install --cursor   # Cursor
 ```
 
-For other clients, the config is an HTTP MCP server at
-`http://127.0.0.1:9377/mcp` with header `Authorization: Bearer <token>`.
+Nothing is registered for agents you don't name. For anything else, the
+config is an HTTP MCP server at `http://127.0.0.1:9377/mcp` with header
+`Authorization: Bearer <token>` (the token is in `~/.taskwindow/token`).
 
 ### 5. Try it
 
