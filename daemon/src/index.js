@@ -6,7 +6,8 @@ import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
 import { installService, uninstallService } from "./service.js";
-import { registerClaude, registerCursor, unregisterAgents } from "./agents.js";
+import { registerClaude, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
+import { createInterface } from "node:readline";
 
 // `taskwindow install` manages the login service and — only with an explicit
 // per-agent flag — registers the MCP server in that agent.
@@ -14,15 +15,51 @@ const args = process.argv.slice(2);
 const verb = args[0];
 const flags = args.slice(1);
 
+const AGENT_CHOICES = [
+  ["1", "Claude Code", registerClaude],
+  ["2", "Cursor", registerCursor],
+  ["3", "OpenCode", registerOpenCode],
+];
+
+async function pickAndRegisterAgents(config) {
+  if (!process.stdin.isTTY) {
+    console.log("[taskwindow] non-interactive session — register agents with: taskwindow install --claude|--cursor|--opencode");
+    return;
+  }
+  console.log("Which coding agents should use TaskWindow?");
+  for (const [num, label] of AGENT_CHOICES) console.log(`  ${num}. ${label}`);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise((resolve) => rl.question("Enter numbers separated by commas (empty to skip): ", resolve));
+  rl.close();
+  const registered = [];
+  for (const pick of answer.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const choice = AGENT_CHOICES.find(([num]) => num === pick);
+    if (!choice) continue;
+    try {
+      await choice[2](config);
+      registered.push(choice[1]);
+    } catch (err) {
+      console.error(`[taskwindow] ${choice[1]} registration failed:`, err.message);
+    }
+  }
+  console.log(
+    registered.length
+      ? `[taskwindow] registered: ${registered.join(", ")} — pair the extension with code ${pairCode} if it hasn't asked`
+      : "[taskwindow] no agents registered — run taskwindow install again to pick some"
+  );
+}
+
 if (verb === "install") {
   const config = loadConfig();
   if (!flags.includes("--no-service")) {
     installService(fileURLToPath(new URL("./index.js", import.meta.url)));
   }
-  if (flags.includes("--claude")) registerClaude(config);
-  if (flags.includes("--cursor")) registerCursor(config);
-  if (flags.includes("--claude") || flags.includes("--cursor")) {
-    console.log(`[taskwindow] pairing code (if the extension asks): ${pairCode ?? "restart the daemon to see it"}`);
+  if (flags.includes("--claude") || flags.includes("--cursor") || flags.includes("--opencode")) {
+    if (flags.includes("--claude")) registerClaude(config);
+    if (flags.includes("--cursor")) registerCursor(config);
+    if (flags.includes("--opencode")) registerOpenCode(config);
+  } else {
+    await pickAndRegisterAgents(config);
   }
   process.exit(0);
 }
