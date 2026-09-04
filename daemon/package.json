@@ -1,0 +1,23 @@
+{
+  "name": "taskwindow-daemon",
+  "version": "0.1.0",
+  "description": "TaskWindow local daemon: bridges the TaskWindow Chrome extension to any MCP client over Streamable HTTP",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "taskwindow": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/run.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  }
+}
