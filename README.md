@@ -58,7 +58,7 @@ Or just keep `npx taskwindow` running in a terminal — both work.
 ### 4. Connect your coding agent (one agent at a time, only when you ask)
 
 ```bash
-taskwindow install --claude   # Claude Code
+taskwindow install --claude   # Claude Code (user scope: every repo)
 taskwindow install --cursor   # Cursor
 ```
 

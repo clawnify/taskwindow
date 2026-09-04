@@ -51,6 +51,38 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "taskwindow:status") renderStatus(msg.connected === true);
 });
 
+// Pairing: exchange the daemon's printed code for the real token.
+$("pair").addEventListener("click", async () => {
+  const status = $("pairStatus");
+  const code = $("pairCode").value.trim().toUpperCase();
+  const port = Number($("port").value) || 9377;
+  if (!code) {
+    status.style.color = "#dc2626";
+    status.textContent = "✗ enter the pairing code";
+    return;
+  }
+  status.style.color = "#666";
+  status.textContent = "pairing…";
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    await chrome.storage.local.set({ token: body.token, port });
+    status.style.color = "#16a34a";
+    status.textContent = "paired ✓ — connecting…";
+    $("token").value = body.token;
+    setTimeout(() => (status.textContent = ""), 4000);
+  } catch (err) {
+    status.style.color = "#dc2626";
+    status.textContent = `✗ ${err.message}`;
+  }
+  setTimeout(() => (status.textContent = ""), 6000);
+});
+
 $("save").addEventListener("click", async () => {
   await chrome.storage.local.set({
     token: $("token").value.trim(),
