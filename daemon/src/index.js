@@ -12,6 +12,15 @@ const { version: VERSION } = createRequire(import.meta.url)("../package.json");
 import { registerClaude, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
 import { createInterface } from "node:readline";
 
+// One-time pairing: the daemon prints a short code at startup; the extension
+// exchanges it for the real token via POST /pair (loopback-only). This defends
+// the pairing endpoint against other local user accounts; a same-user process
+// could read the token file directly, so the code adds no obstacle there.
+const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+const pairCode = Array.from(randomBytes(6))
+  .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
+  .join("");
+
 // `taskwindow install` manages the login service and — only with an explicit
 // per-agent flag — registers the MCP server in that agent.
 const args = process.argv.slice(2);
@@ -79,10 +88,6 @@ if (verb === "uninstall") {
 const config = loadConfig();
 const bridge = new Bridge({ token: config.token });
 
-const PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-const pairCode = Array.from(randomBytes(6))
-  .map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length])
-  .join("");
 const handleMcp = createMcpRequestHandler({ bridge, version: VERSION });
 
 // One-time pairing: the daemon prints a short code at startup; the extension
