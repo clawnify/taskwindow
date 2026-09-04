@@ -40,12 +40,15 @@ Or just keep `npx taskwindow` running in a terminal — both work.
 
 ### 2. Install the Chrome extension
 
-1. Download `TaskWindow-extension-*.zip` from the
-   [latest release](https://github.com/clawnify/taskwindow/releases) and unzip it
-2. Open `chrome://extensions`
-3. Enable **Developer mode** (top right)
-4. Click **Load unpacked** and select the unzipped folder
-5. Click the TaskWindow icon in the toolbar
+```bash
+taskwindow install --extension
+```
+
+That downloads the latest release, unpacks it, opens Chrome at
+`chrome://extensions`, and prints the last 3 clicks (Developer mode →
+Load unpacked → select the printed folder). Chrome's own policy requires
+those clicks — no tool can do them for you. A Web Store listing (one-click
+install + auto-updates) is planned.
 
 ### 3. Pair the extension with the daemon
 

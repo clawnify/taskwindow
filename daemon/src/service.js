@@ -75,6 +75,53 @@ WantedBy=default.target
   console.log(`[taskwindow] run the daemon with: node ${daemonEntryPath}`);
 }
 
+/**
+ * Extension onboarding: fetch (or unzip a given) release zip, open Chrome at
+ * chrome://extensions, and print the exact remaining clicks. Chrome blocks
+ * programmatic unpacked installs, so a human does the final 3 clicks — the
+ * command does everything else.
+ */
+export function installExtension(zipPath) {
+  const extDir = join(homedir(), ".taskwindow", "extension");
+  const open = (u) => {
+    try {
+      execSync(`open -a "Google Chrome" "${u}"`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (!zipPath) {
+    // No zip given: fetch the latest release asset from GitHub.
+    try {
+      const api = "https://api.github.com/repos/clawnify/taskwindow/releases/latest";
+      const release = JSON.parse(execSync(`curl -sL "${api}"`, { maxBuffer: 20e6 }).toString());
+      const asset = (release.assets || []).find((a) => a.name.startsWith("TaskWindow-extension-"));
+      if (!asset) throw new Error("no extension asset in the latest release");
+      zipPath = join(homedir(), ".taskwindow", asset.name);
+      execSync(`curl -sL -o "${zipPath}" "${asset.browser_download_url}"`);
+      console.log(`[taskwindow] downloaded ${asset.name}`);
+    } catch (err) {
+      console.error(`[taskwindow] couldn't download the extension zip (${err.message}).`);
+      console.error(`[taskwindow] download it from https://github.com/clawnify/taskwindow/releases and re-run with --extension <zip>`);
+      return;
+    }
+  }
+
+  mkdirSync(extDir, { recursive: true });
+  execSync(`unzip -oq "${zipPath}" -d "${extDir}"`);
+  console.log(`[taskwindow] extension unpacked to ${extDir}`);
+  if (open("chrome://extensions")) {
+    console.log("[taskwindow] opened chrome://extensions in Chrome — finish in 3 clicks:");
+  } else {
+    console.log("[taskwindow] open chrome://extensions in Chrome — finish in 3 clicks:");
+  }
+  console.log("  1. turn on Developer mode (top right)");
+  console.log(`  2. click "Load unpacked" and select: ${extDir}`);
+  console.log("  3. done — the extension pairs itself from here (options page if it asks)");
+}
+
 export function uninstallService() {
   const system = platform();
   try {

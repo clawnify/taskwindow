@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
-import { installService, uninstallService } from "./service.js";
+import { installService, uninstallService, installExtension } from "./service.js";
 import { createRequire } from "node:module";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
@@ -56,6 +56,10 @@ if (verb === "install") {
   const config = loadConfig();
   if (!flags.includes("--no-service")) {
     installService(fileURLToPath(new URL("./index.js", import.meta.url)));
+  }
+  const extFlag = flags.indexOf("--extension");
+  if (extFlag !== -1) {
+    installExtension(flags[extFlag + 1] && !flags[extFlag + 1].startsWith("--") ? flags[extFlag + 1] : null);
   }
   if (flags.includes("--claude") || flags.includes("--cursor") || flags.includes("--opencode")) {
     if (flags.includes("--claude")) registerClaude(config);
