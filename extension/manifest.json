@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TaskWindow",
-  "version": "0.1.12",
+  "version": "0.2.0",
   "description": "Let any MCP-speaking coding agent drive your real, logged-in browser tab.",
   "minimum_chrome_version": "116",
   "icons": {
