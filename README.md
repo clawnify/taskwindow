@@ -12,31 +12,25 @@ MCP over HTTP.
 
 ## Setup (5 minutes)
 
-### 1. Start the daemon
+### 1. Install and start the daemon
 
 Requires Node 18+.
-
-```bash
-npx taskwindow
-```
-
-You'll see:
-
-```
-[taskwindow] daemon listening on http://127.0.0.1:9377
-[taskwindow] pairing code: A6LU5X — enter it in the TaskWindow extension options
-[taskwindow] claude code: claude mcp add taskwindow --transport http http://127.0.0.1:9377/mcp --header "Authorization: Bearer …"
-```
-
-The daemon is what your agent talks to, so it needs to stay running.
-To make it survive laptop restarts (installs a login service):
 
 ```bash
 npm install -g taskwindow
 taskwindow install
 ```
 
-Or just keep `npx taskwindow` running in a terminal — both work.
+That installs a login service (the daemon starts now and after every laptop
+restart — no terminal needed) and prints:
+
+```
+[taskwindow] login service installed (~/Library/LaunchAgents/com.clawnify.taskwindow.plist)
+[taskwindow] pairing code: A6LU5X — enter it in the TaskWindow extension options
+```
+
+Keep the pairing code for step 3. (Prefer running it by hand? `npx taskwindow`
+in a terminal works too — it just won't survive a restart.)
 
 ### 2. Install the Chrome extension
 
