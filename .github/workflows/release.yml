@@ -63,10 +63,13 @@ jobs:
             --title "TaskWindow ${GITHUB_REF_NAME}" \
             --notes-file notes.md
       - name: Publish daemon to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
         working-directory: daemon
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "NPM_TOKEN secret not set — skipping npm publish"
+            exit 0
+          fi
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
           npm publish --access public
