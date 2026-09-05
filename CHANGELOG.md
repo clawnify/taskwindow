@@ -24,6 +24,13 @@ and in `taskwindow_status` — telling the agent to ask you before running
 `taskwindow update`. `doctor` shows it too. Disable with
 `~/.taskwindow/no-update-check`.
 
+**`computer` screenshots can be saved to disk.** By default a screenshot comes
+back inline, with no path — nothing else could use the actual image. Pass
+`save_to_disk: true` and the daemon also writes the PNG to a temp directory
+(OS-cleaned) and returns the absolute path in the result text, so the agent can
+attach it to an issue, feed it to another tool, or just verify it with `file`.
+The extension is untouched; this happens entirely daemon-side.
+
 Extension-side: after `taskwindow install`, reload TaskWindow in
 `chrome://extensions`.
 
