@@ -44,13 +44,20 @@ open by a pinned tab no agent can close. Screenshot done. Now try:
 ### Repair and advanced commands
 
 ```bash
+taskwindow update              # update daemon + extension to the latest release, no clicks
 taskwindow doctor              # diagnose daemon, extension, versions, and agents
 taskwindow pair                # create a manual one-time pairing code
-taskwindow install             # re-run setup; also repairs and updates the extension
+taskwindow install             # re-run first-time setup; also repairs the extension
 taskwindow install --claude    # add Claude Code without repeating setup
 taskwindow install --cursor    # add Cursor without repeating setup
 taskwindow install --opencode  # add OpenCode without repeating setup
 ```
+
+When a newer release exists, agents are told once per session (in the
+`tabs_create` result and in `taskwindow_status`) to ask you before running
+`taskwindow update`. The daemon learns this by asking the npm registry for the
+package's latest version at most once a day; create `~/.taskwindow/no-update-check`
+to turn that off.
 
 Use `taskwindow install --no-extension` to install only the daemon and selected
 agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with

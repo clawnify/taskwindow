@@ -51,6 +51,7 @@ const canned = {
   read_network_requests: { data: [{ method: "GET", url: "https://example.com/", status: 200 }] },
   shortcuts_list: { data: [{ name: "screenshot", description: "Take a screenshot" }] },
   shortcuts_execute: { text: "1. computer:\nok: screenshot" },
+  reload_extension: { text: "extension test-fake reloading" },
   gif_record: { image: { data: "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", mimeType: "image/gif" }, text: "recorded 5 frames" },
 };
 

@@ -46,6 +46,13 @@ async function main() {
   const healthBody = await health.json();
   check("GET /health without token is allowed (loopback only)", health.status === 200 && healthBody.ok === true);
   check("health reports extension connected", healthBody.extensionConnected === true);
+  check("health carries the latest known version", healthBody.latestVersion === "9.9.9", JSON.stringify(healthBody));
+
+  console.log("extension reload (taskwindow update):");
+  const unauthReload = await fetch(`${BASE}/extension/reload`, { method: "POST" });
+  check("reload requests require daemon authentication", unauthReload.status === 401);
+  const reload = await fetch(`${BASE}/extension/reload`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  check("authenticated reload reaches the extension", reload.status === 200 && (await reload.json()).ok === true);
 
   console.log("pairing:");
   const unauthPairRequest = await fetch(`${BASE}/pair/request`, { method: "POST" });
@@ -102,6 +109,8 @@ async function main() {
   console.log("tools/call through the extension bridge:");
   const status = await client.callTool({ name: "taskwindow_status", arguments: {} });
   check("status reports daemon and extension readiness", !status.isError && status.content[0].text.includes('"extensionConnected": true'));
+  check("status names the newer version and says to ask the user first",
+    status.content[0].text.includes('"latestVersion": "9.9.9"') && /9\.9\.9 is available[\s\S]*Ask the user for permission[\s\S]*taskwindow update/.test(status.content[0].text));
 
   const tabs = await client.callTool({ name: "tabs_list", arguments: {} });
   check("tabs_list returns text", !tabs.isError && tabs.content[0].text.includes("example.com"));
@@ -111,8 +120,24 @@ async function main() {
   const img = shot.content.find((c) => c.type === "image");
   check("computer screenshot returns image content block", !!img && img.data === "aWNvbg==" && img.mimeType === "image/png");
 
+  const saved = await client.callTool({ name: "computer", arguments: { action: "screenshot", save_to_disk: true } });
+  const savedText = saved.content.find((c) => c.type === "text").text;
+  const savedPath = savedText.match(/Saved to: (.+)/)?.[1];
+  const { readFile } = await import("node:fs/promises");
+  let savedOk = false;
+  if (savedPath) {
+    const buf = await readFile(savedPath);
+    savedOk = buf.toString("base64") === "aWNvbg==";
+  }
+  check("computer screenshot save_to_disk writes file and returns path", savedOk, `text: ${savedText}`);
+
   const nav = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other" } });
   check("navigate returns final url/title", !nav.isError && nav.content.at(-1).text.includes("Other"));
+
+  const created = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/", task: "Update notice" } });
+  check("tabs_create appends the update notice once, as its own text block",
+    !created.isError && created.content.length === 2 && /9\.9\.9 is available/.test(created.content[1].text) && /Ask the user for permission/.test(created.content[1].text));
+  check("other tools stay quiet about updates", !tabs.content.some((c) => /is available/.test(c.text || "")));
 
   const noTask = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/" } });
   check("tabs_create without task is rejected", noTask.isError === true && /task/i.test(noTask.content?.[0]?.text || ""));
