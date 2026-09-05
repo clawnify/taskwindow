@@ -24,6 +24,9 @@ and in `taskwindow_status` — telling the agent to ask you before running
 `taskwindow update`. `doctor` shows it too. Disable with
 `~/.taskwindow/no-update-check`.
 
+Extension-side: after `taskwindow install`, reload TaskWindow in
+`chrome://extensions`.
+
 ### Fixed
 
 **Screenshot coordinates now match click coordinates on Retina and zoomed
