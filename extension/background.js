@@ -1,4 +1,4 @@
-import { tabsList, tabsCreate, tabsClose, navigate, groupsSummary, focusGroup, adoptWindow } from "./tools/tabs.js";
+import { tabsList, tabsCreate, tabsClose, navigate, reload, groupsSummary, focusGroup, adoptWindow } from "./tools/tabs.js";
 import { computer } from "./tools/computer.js";
 import { setViewport } from "./tools/responsive.js";
 import { readPage, find, getPageText, formInput, fileUpload, uploadImage } from "./tools/page.js";
@@ -16,6 +16,7 @@ const HANDLERS = {
   tabs_create: tabsCreate,
   tabs_close: tabsClose,
   navigate: navigate,
+  reload: reload,
   computer: computer,
   set_viewport: setViewport,
   read_page: readPage,

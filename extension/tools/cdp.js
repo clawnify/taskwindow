@@ -150,6 +150,9 @@ export async function ensureAttached(tabId) {
   for (const [method, params] of [
     ["Runtime.enable"], ["Log.enable"], ["Page.enable"],
     ["Network.enable", { maxResourceBufferSize: 10_000_000, maxTotalBufferSize: 50_000_000 }],
+    // The agent window is deliberately never focused (the user is elsewhere);
+    // make the page behave as if it were, as headless-style drivers do.
+    ["Emulation.setFocusEmulationEnabled", { enabled: true }],
   ]) {
     try {
       await send(tabId, method, params);

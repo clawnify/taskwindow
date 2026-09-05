@@ -18,6 +18,8 @@ const LEGACY_GROUP_KEY = "agentTabGroupId";
 const ALLOW_ALL_KEY = "allowAllTabs";
 const SEPARATE_WINDOW_KEY = "separateWindow";
 const DEFAULT_TASK = "TaskWindow"; // title of the pre-task-era fixed group (migration only)
+/** Pinned anchor tab that keeps the shared agent window alive; outside every group, so no agent can close it. */
+const workspaceUrl = () => chrome.runtime.getURL("workspace/workspace.html");
 
 // chrome.storage has no transactions: serialize every read-modify-write so
 // concurrent agent sessions can't clobber each other's registrations.
@@ -485,6 +487,38 @@ async function restoreFocusIfStolen(previousWindowId) {
   } catch {}
 }
 
+/**
+ * The window already hosting the agent's work, or null if there is none.
+ *
+ * A Chrome window holds many tab groups, so every task joins one shared agent
+ * window rather than opening its own — concurrent agents included. Only groups
+ * in our own registry are considered, so this never returns the user's window
+ * unless they put an agent group there themselves (which is what adoptWindow
+ * is for). Most-recently-used first, so a new task lands beside live work
+ * rather than in the window of some long-idle group.
+ */
+async function agentWindowId() {
+  const all = await agentGroups();
+  const entries = Object.values(all)
+    .flatMap((session) => Object.values(session))
+    .sort((a, b) => b.lastUsed - a.lastUsed);
+  for (const { groupId } of entries) {
+    try {
+      const tabs = await chrome.tabs.query({ groupId });
+      if (tabs.length > 0) return tabs[0].windowId;
+    } catch {}
+  }
+  // Every task may have finished, but the anchored window is still open. Not
+  // query({url}): match patterns only cover http(s)/file, so a chrome-extension
+  // URL there matches nothing. `pinned` is a plain filter; compare URLs ourselves.
+  try {
+    const pinned = await chrome.tabs.query({ pinned: true });
+    const anchor = pinned.find((t) => t.url === workspaceUrl());
+    if (anchor) return anchor.windowId;
+  } catch {}
+  return null;
+}
+
 export async function tabsCreate({ url, active = true, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   const taskUsed = normalizeTask(task); // required, non-empty
@@ -497,8 +531,9 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   const previouslyFocused = (await chrome.windows.getLastFocused().catch(() => null))?.id ?? null;
 
   if (separateWindow) {
-    // Work in the task group's own window: create there, or spin up a new
-    // window on first use so the user's window is never touched.
+    // Work in the agent's window, never the user's: this task's own group if it
+    // already has one, else whatever window the agent is already using, else a
+    // new window on first use.
     let windowId = null;
     if (existingGroupId != null) {
       try {
@@ -506,22 +541,40 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
         if (groupTabs.length > 0) windowId = groupTabs[0].windowId;
       } catch {}
     }
+    if (windowId == null) windowId = await agentWindowId();
     if (windowId != null) {
       tab = await chrome.tabs.create({ url, active, windowId });
-      if (active) await chrome.windows.update(windowId, { focused: true });
-      else await restoreFocusIfStolen(previouslyFocused);
     } else {
-      const win = await chrome.windows.create({ url, focused: !!active });
-      tab = win.tabs?.[0];
-      if (!tab) throw new Error("window was created but Chrome returned no tab");
+      // First use: a fresh agent window, anchored by a pinned tab outside any
+      // group. Chrome drops a window with its last tab, and one task finishing
+      // must not take the shared window (and wherever the user put it) away
+      // from every other agent — and no agent can close a tab it can't reach.
+      const win = await chrome.windows.create({ url: workspaceUrl(), focused: false });
+      const anchor = win.tabs?.[0];
+      if (!anchor) throw new Error("window was created but Chrome returned no tab");
+      await chrome.tabs.update(anchor.id, { pinned: true });
+      tab = await chrome.tabs.create({ url, active, windowId: win.id });
       createdNewWindow = true;
-      if (!active) await restoreFocusIfStolen(previouslyFocused);
     }
+    // `active` means active *within the agent window*, so the page renders and
+    // screenshots work — never that the agent window takes focus. The user is
+    // in their own window or another app entirely; Chrome sometimes raises a
+    // window on tab creation regardless, so hand focus straight back.
+    await restoreFocusIfStolen(previouslyFocused);
   } else {
     tab = await chrome.tabs.create({ url, active });
   }
 
   const { groupId, task: taskName } = await ensureTaskGroup(tab.id, taskUsed, token);
+
+  // Agents open the same page again when they've lost track of the tab they
+  // already have, and nothing told them. Don't dedupe silently (two tabs of one
+  // URL is sometimes deliberate) — point at the existing tab instead.
+  const sameUrl = (u) => String(u || "").split("#")[0];
+  const duplicates = (await chrome.tabs.query({ groupId }))
+    .filter((t) => t.id !== tab.id && sameUrl(t.url || t.pendingUrl) === sameUrl(url))
+    .map((t) => t.id);
+
   return {
     data: {
       id: tab.id,
@@ -532,10 +585,14 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
       task: taskName,
       sessionToken: token,
       newWindow: createdNewWindow,
+      alreadyOpenIn: duplicates,
     },
     text:
       `opened tab ${tab.id} in the "${taskName}" group${createdNewWindow ? " in a new window" : ""}: ${tab.url || url}` +
-      ` — sessionToken ${token}: pass it as "sessionToken" in every subsequent browser tool call`,
+      ` — sessionToken ${token}: pass it as "sessionToken" in every subsequent browser tool call` +
+      (duplicates.length
+        ? `\nnote: this group already had ${duplicates.length === 1 ? "tab" : "tabs"} ${duplicates.join(", ")} at this URL — next time use reload or navigate on that tab instead of opening another`
+        : ""),
   };
 }
 
@@ -547,15 +604,12 @@ export async function tabsClose({ tabId, sessionToken } = {}) {
   return { text: `closed tab ${tab.id}` };
 }
 
-export async function navigate({ url, tabId, sessionToken } = {}) {
-  const tab = await resolveTab(tabId, sessionToken);
-  const updated = await chrome.tabs.update(tab.id, { url });
-
-  // Wait (up to 10s) for the load event so agents don't race page loads.
-  let settled = await new Promise((resolve) => {
-    const timeout = setTimeout(() => cleanup(false), 10_000);
+/** Resolve true once the tab fires its load event, false after `ms` — so agents don't race page loads. */
+function waitForLoad(tabId, ms = 10_000) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => cleanup(false), ms);
     function listener(id, info) {
-      if (id === tab.id && info.status === "complete") cleanup(true);
+      if (id === tabId && info.status === "complete") cleanup(true);
     }
     function cleanup(didLoad) {
       clearTimeout(timeout);
@@ -564,15 +618,32 @@ export async function navigate({ url, tabId, sessionToken } = {}) {
     }
     chrome.tabs.onUpdated.addListener(listener);
   });
+}
 
+/** Shared tail of navigate/reload: the tab's state once the load settled (or the tab vanished). */
+async function loadOutcome(tabId, settled, verb) {
   let fresh;
   try {
-    fresh = await chrome.tabs.get(tab.id);
+    fresh = await chrome.tabs.get(tabId);
   } catch {
-    return { text: `tab ${tab.id} closed during navigation to ${url}` };
+    return { text: `tab ${tabId} closed during ${verb}` };
   }
   return {
-    data: { tabId: tab.id, url: fresh.url, title: fresh.title, loadTimedOut: !settled },
-    text: `tab ${tab.id} now at ${fresh.url}${fresh.title ? ` — "${fresh.title}"` : ""}${!settled ? " (load event did not fire within 10s; the page may still be loading)" : ""}`,
+    data: { tabId, url: fresh.url, title: fresh.title, loadTimedOut: !settled },
+    text: `tab ${tabId} now at ${fresh.url}${fresh.title ? ` — "${fresh.title}"` : ""}${!settled ? " (load event did not fire within 10s; the page may still be loading)" : ""}`,
   };
+}
+
+export async function navigate({ url, tabId, sessionToken } = {}) {
+  const tab = await resolveTab(tabId, sessionToken);
+  await chrome.tabs.update(tab.id, { url });
+  const settled = await waitForLoad(tab.id);
+  return loadOutcome(tab.id, settled, `navigation to ${url}`);
+}
+
+export async function reload({ tabId, sessionToken, bypassCache = false } = {}) {
+  const tab = await resolveTab(tabId, sessionToken);
+  await chrome.tabs.reload(tab.id, { bypassCache: !!bypassCache });
+  const settled = await waitForLoad(tab.id);
+  return loadOutcome(tab.id, settled, "reload");
 }

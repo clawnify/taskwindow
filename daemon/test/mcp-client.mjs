@@ -87,13 +87,13 @@ async function main() {
   const { tools } = await client.listTools();
   const expected = [
     "taskwindow_status",
-    "tabs_list", "tabs_create", "tabs_close", "navigate", "computer", "read_page", "find",
+    "tabs_list", "tabs_create", "tabs_close", "navigate", "reload", "computer", "read_page", "find",
     "get_page_text", "form_input", "file_upload", "upload_image", "javascript_execute",
     "read_console_messages", "read_network_requests", "browser_batch", "gif_record",
     "shortcuts_list", "shortcuts_execute",
   ];
   const got = tools.map((t) => t.name).sort();
-  check(`all ${expected.length} tools exposed`, expected.length === 19 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
+  check(`all ${expected.length} tools exposed`, expected.length === 20 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
   const computer = tools.find((t) => t.name === "computer");
   check("computer schema has action enum", JSON.stringify(computer.inputSchema).includes("screenshot"));
   const tabsCreate = tools.find((t) => t.name === "tabs_create");
