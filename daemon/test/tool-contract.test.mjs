@@ -23,6 +23,9 @@ const extToolsDir = join(root, "extension", "tools");
 
 /** Tools whose handler lives in the daemon, so there is no extension function. */
 const DAEMON_HANDLED = new Set(["browser_batch"]);
+// Params the daemon consumes and strips before forwarding, so the extension
+// handler never reads them (see registerTools).
+const DAEMON_HANDLED_PARAMS = { computer: new Set(["save_to_disk"]) };
 
 /** Split on commas at brace/bracket/paren depth 0 (defaults may contain commas). */
 function splitTopLevel(src) {
@@ -134,7 +137,8 @@ test("every tool schema matches its extension handler", () => {
       continue;
     }
 
-    const declared = new Set(Object.keys(def.inputSchema || {}));
+    const daemonParams = DAEMON_HANDLED_PARAMS[def.name] || new Set();
+    const declared = new Set(Object.keys(def.inputSchema || {}).filter((p) => !daemonParams.has(p)));
     const undeclared = [...read].filter((p) => !declared.has(p));
     const unused = [...declared].filter((p) => !read.has(p));
 

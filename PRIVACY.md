@@ -22,6 +22,11 @@ party.
   extension storage and in `~/.taskwindow/token` on your machine.
 - **No telemetry.** No usage statistics, crash reports, or tracking of any
   kind are collected or transmitted.
+- **Update check.** The daemon (not the extension) asks the public npm
+  registry for the latest `taskwindow` version at most once a day so it can
+  tell you an update exists. The request carries no data about you or your
+  machine beyond what any HTTP request carries. Create
+  `~/.taskwindow/no-update-check` to disable it.
 - **No data leaves your machine.** Page content, screenshots, and recordings
   captured by the agent flow only between the page, the extension, your local
   daemon, and the agent you run. Nothing is uploaded anywhere by TaskWindow.
