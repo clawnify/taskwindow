@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
+// Injected into every browser tool below (see toolDefs) rather than spread by
+// hand into each schema: one missed spread made read_network_requests
+// uncallable in v0.2.0.
 const sessionToken = z
   .string()
   .optional()
@@ -13,7 +16,7 @@ const sessionToken = z
 // The MCP layer turns `image` into an image content block and everything else
 // into text blocks.
 
-const toolDefs = [
+const rawDefs = [
   {
     name: "taskwindow_status",
     description:
@@ -25,7 +28,7 @@ const toolDefs = [
     name: "tabs_list",
     description:
       "List the tabs in your session (id, title, URL, active state) — by default only the tabs it created, grouped by task. Pass the sessionToken returned by tabs_create.",
-    inputSchema: { sessionToken },
+    inputSchema: {},
     timeoutMs: 10_000,
   },
   {
@@ -51,14 +54,14 @@ const toolDefs = [
   {
     name: "tabs_close",
     description: "Close a tab.",
-    inputSchema: { tabId, sessionToken },
+    inputSchema: { tabId },
     timeoutMs: 10_000,
   },
   {
     name: "navigate",
     description:
       "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title.",
-    inputSchema: { url: z.string().url(), tabId: tabId.optional(), sessionToken },
+    inputSchema: { url: z.string().url(), tabId: tabId.optional() },
     timeoutMs: 30_000,
   },
   {
@@ -84,7 +87,6 @@ const toolDefs = [
       dy: z.number().int().optional().describe("Vertical scroll delta in pixels (positive scrolls down)"),
       ms: z.number().int().min(0).max(10_000).optional().describe('Milliseconds for the "wait" action (max 10000)'),
       fullPage: z.boolean().optional().describe('For "screenshot": capture the whole scrollable page instead of the viewport'),
-      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -102,7 +104,6 @@ const toolDefs = [
       })).min(1).max(4).optional().describe("Sizes to render side by side, e.g. [{\"width\":390,\"height\":844},{\"width\":1280,\"height\":800}]. Omit to close the responsive view."),
       url: z.string().url().optional().describe("Page to render (defaults to the current tab's URL)"),
       tabId: tabId.optional(),
-      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -112,7 +113,7 @@ const toolDefs = [
       "Structured accessibility-style snapshot of the page: a text tree of interactive elements and content, " +
       "each labelled with a ref (e.g. e42) you can pass to form_input / file_upload. Cheaper and more reliable " +
       "than a screenshot for forms and navigation.",
-    inputSchema: { tabId: tabId.optional(), sessionToken },
+    inputSchema: { tabId: tabId.optional() },
     timeoutMs: 20_000,
   },
   {
@@ -120,7 +121,7 @@ const toolDefs = [
     description:
       "Find elements on the page matching a query (matches role, accessible name and visible text, case-insensitive). " +
       "Returns matching refs plus enough context to pick between them.",
-    inputSchema: { query: z.string().min(1), tabId: tabId.optional(), sessionToken },
+    inputSchema: { query: z.string().min(1), tabId: tabId.optional() },
     timeoutMs: 20_000,
   },
   {
@@ -129,7 +130,6 @@ const toolDefs = [
     inputSchema: {
       tabId: tabId.optional(),
       maxLength: z.number().int().min(100).max(500_000).optional().describe("Truncate output to this many characters (default 50000)"),
-      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -144,7 +144,6 @@ const toolDefs = [
       selector: z.string().optional().describe("CSS selector as fallback when no ref is available"),
       clear: z.boolean().optional().describe("Clear the field before typing (default true for text fields)"),
       tabId: tabId.optional(),
-      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -162,7 +161,6 @@ const toolDefs = [
       ref: z.string().optional(),
       selector: z.string().optional(),
       tabId: tabId.optional(),
-      sessionToken,
     },
     timeoutMs: 60_000,
   },
@@ -179,7 +177,6 @@ const toolDefs = [
       ref: z.string().optional(),
       selector: z.string().optional(),
       tabId: tabId.optional(),
-      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -192,7 +189,6 @@ const toolDefs = [
       code: z.string().describe("JavaScript source to evaluate, e.g. \"document.title\""),
       awaitPromise: z.boolean().optional().describe("Wait for a returned Promise to settle (default true)"),
       tabId: tabId.optional(),
-      sessionToken,
     },
     timeoutMs: 30_000,
   },
@@ -206,7 +202,6 @@ const toolDefs = [
       pattern: z.string().optional().describe("Only messages matching this regular expression"),
       level: z.enum(["log", "info", "warning", "error"]).optional().describe("Minimum severity to include"),
       limit: z.number().int().min(1).max(1000).optional().describe("Max messages to return (default 200, newest last)"),
-      sessionToken,
     },
     timeoutMs: 20_000,
   },
@@ -232,7 +227,6 @@ const toolDefs = [
         tool: z.string(),
         params: z.record(z.any()).optional().default({}),
       })).min(1).max(20),
-      sessionToken,
     },
     timeoutMs: 300_000,
   },
@@ -246,7 +240,6 @@ const toolDefs = [
       duration: z.number().min(0.5).max(30).describe("Seconds to record (max 30)"),
       fps: z.number().min(1).max(10).optional().describe("Frames per second (default 5)"),
       maxWidth: z.number().int().min(100).max(1280).optional().describe("Downscale frames to at most this width (default 800)"),
-      sessionToken,
     },
     timeoutMs: 180_000,
   },
@@ -254,15 +247,28 @@ const toolDefs = [
     name: "shortcuts_list",
     description: "List the extension-defined shortcut macros (named sequences of tool actions).",
     inputSchema: {},
+    noSession: true, // reads the macro registry, never a tab
     timeoutMs: 10_000,
   },
   {
     name: "shortcuts_execute",
     description: "Run a shortcut macro defined in the extension and return each action's result.",
-    inputSchema: { name: z.string().min(1), sessionToken },
+    inputSchema: { name: z.string().min(1) },
     timeoutMs: 120_000,
   },
 ];
+
+/**
+ * Every tool that reaches a tab is session-scoped, so `sessionToken` is added
+ * here instead of being spread by hand into each schema — a tool whose handler
+ * scopes by session but whose schema omitted the param is uncallable, which is
+ * how read_network_requests shipped broken in v0.2.0. A tool that never touches
+ * a tab opts out with `noSession`; a tool that declares its own sessionToken
+ * (tabs_create's has different semantics) keeps it.
+ */
+const toolDefs = rawDefs.map((def) =>
+  def.local || def.noSession ? def : { ...def, inputSchema: { sessionToken, ...def.inputSchema } }
+);
 
 const toolNames = new Set(toolDefs.filter((tool) => !tool.local).map((tool) => tool.name));
 
