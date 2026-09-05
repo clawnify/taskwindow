@@ -273,7 +273,7 @@ async function ensureTaskGroup(tabId, taskName, sessionToken) {
       try {
         await chrome.tabGroups.get(groupId);
         await chrome.tabs.group({ tabIds: [tabId], groupId });
-        await chrome.tabGroups.update(groupId, { color: "green" });
+        await chrome.tabGroups.update(groupId, { color: "blue" });
         session[key] = { groupId, lastUsed: Date.now() };
         all[token] = session;
         await saveAgentGroups(all);
@@ -284,7 +284,7 @@ async function ensureTaskGroup(tabId, taskName, sessionToken) {
       }
     }
     groupId = await chrome.tabs.group({ tabIds: [tabId] });
-    await chrome.tabGroups.update(groupId, { title: task, color: "green" });
+    await chrome.tabGroups.update(groupId, { title: task, color: "blue" });
     session[key] = { groupId, lastUsed: Date.now() };
     all[token] = session;
     await saveAgentGroups(all);
@@ -338,7 +338,7 @@ export async function adoptWindow(windowId) {
         await chrome.tabs.group({ tabIds, groupId: gid });
       } catch {
         const fresh = await chrome.tabs.group({ tabIds });
-        await chrome.tabGroups.update(fresh, { title: name, color: "green" });
+        await chrome.tabGroups.update(fresh, { title: name, color: "blue" });
         session[name].groupId = fresh;
       }
       await touchGroup(token, name);

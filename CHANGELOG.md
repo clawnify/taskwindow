@@ -3,6 +3,16 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.3
+
+Extension-side again: after `taskwindow install`, reload TaskWindow in
+`chrome://extensions`.
+
+### Changed
+
+New icon, and task groups are now blue — the same blue as the glow that marks
+where an agent is acting on a page — instead of green.
+
 ## 0.2.2
 
 This one changes the extension, so updating the daemon alone is not enough:

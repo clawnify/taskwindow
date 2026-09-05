@@ -36,7 +36,7 @@ connected.
 
 Ask your agent: *"Open example.com in a new tab and take a screenshot."*
 
-A green tab group named after your task appears in a separate TaskWindow
+A blue tab group named after your task appears in a separate TaskWindow
 window — the agents' workspace, shared by every task and every agent, and kept
 open by a pinned tab no agent can close. Screenshot done. Now try:
 *"Find the sign-up link and read the page's headings."*
@@ -69,7 +69,7 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
 
 ## How the isolation works
 
-- **Task groups & sessions**: every tab the agent creates goes into a green tab
+- **Task groups & sessions**: every tab the agent creates goes into a blue tab
   group named after its task (`tabs_create` requires the task name — it says
   what the group is about). Sessions are isolated from each other:
   `tabs_create` returns a secret sessionToken and every browser tool call is
