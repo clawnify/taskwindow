@@ -186,7 +186,7 @@ async function runDoctor(config) {
     console.log("✗ Daemon not running — run: taskwindow install");
   }
   if (installedVersion) console.log(`✓ Extension files installed (v${installedVersion}, ${extensionInstallDir()})`);
-  else console.log("✗ Extension files not installed — run: taskwindow install --extension");
+  else console.log("✗ Extension files not installed — run: taskwindow install");
   if (health?.extensionConnected) {
     const versionNote = installedVersion && health.extensionVersion && installedVersion !== health.extensionVersion
       ? ` — installed files are v${installedVersion}; reload the extension in Chrome`

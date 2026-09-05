@@ -178,11 +178,17 @@ const NEED_SESSION =
   "sessionToken — and pass that sessionToken in every subsequent browser tool call to " +
   "act on your session's tabs.";
 
+/**
+ * Deliberately says nothing about *why* the tab is out of reach: it may belong
+ * to another session, to the user, or not exist at all. Distinguishing those
+ * would let an agent map the browser by probing tab ids, and the remedy is the
+ * same in every case.
+ */
 function deniedError(tabId) {
   return new Error(
-    `Access denied: tab ${tabId} belongs to a different agent session's tab groups. ` +
-      `Use tabs_create (with a task name and your sessionToken) to open a tab in your own session; ` +
-      `the user can allow all tabs from the extension's options page.`
+    `Access denied: tab ${tabId} is not in your session's tab groups. ` +
+      `Use tabs_list to see your tabs, or tabs_create (with a task name and your sessionToken) ` +
+      `to open one in your own session; the user can allow all tabs from the extension's options page.`
   );
 }
 
@@ -199,7 +205,16 @@ async function assertAllowedTab(tab, sessionToken) {
 export async function resolveTab(tabId, sessionToken) {
   const token = normalizeToken(sessionToken);
   if (tabId != null) {
-    const tab = await chrome.tabs.get(tabId); // throws a clear error if missing
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (err) {
+      // Under the default policy a missing tab and someone else's tab must look
+      // identical, or the difference between the two errors reveals which ids
+      // are live. With allowAllTabs there is nothing to hide, so say it plainly.
+      if (!(await policyAllowsAll())) throw deniedError(tabId);
+      throw err;
+    }
     await assertAllowedTab(tab, token);
     return tab;
   }
@@ -525,10 +540,11 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
 }
 
 export async function tabsClose({ tabId, sessionToken } = {}) {
-  const tab = await chrome.tabs.get(tabId);
-  await assertAllowedTab(tab, sessionToken);
-  await chrome.tabs.remove(tabId);
-  return { text: `closed tab ${tabId}` };
+  // Via resolveTab, not a bare tabs.get: it is the one place that looks a tab
+  // up and checks it, so closing cannot leak which ids exist.
+  const tab = await resolveTab(tabId, sessionToken);
+  await chrome.tabs.remove(tab.id);
+  return { text: `closed tab ${tab.id}` };
 }
 
 export async function navigate({ url, tabId, sessionToken } = {}) {
