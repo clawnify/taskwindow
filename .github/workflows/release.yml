@@ -46,7 +46,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > notes.md <<'EOF'
+          # Release notes = this version's CHANGELOG.md section + the install
+          # boilerplate. Deliberately not the tag annotation: `git tag -m`
+          # strips lines starting with '#', which silently eats markdown
+          # headings. A missing section just yields install-only notes.
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            $0 ~ "^## +"v"([^0-9.]|$)" { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > notes.md || : > notes.md
+          if [ -s notes.md ]; then printf '\n' >> notes.md; fi
+          cat >> notes.md <<'EOF'
           ## Install
 
           Run `npm install -g taskwindow@latest`, then `taskwindow install`. The guided installer configures the daemon and selected coding agents, downloads the extension, opens Chrome, and pairs automatically after you load the unpacked folder.

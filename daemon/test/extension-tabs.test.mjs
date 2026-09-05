@@ -149,9 +149,21 @@ test("a session cannot act on another session's tabs", async () => {
   const b = await tabsCreate({ url: "https://b.example", task: "Research competitors" });
   await assert.rejects(
     () => tabsClose({ tabId: a.data.id, sessionToken: b.data.sessionToken }),
-    /different agent session/
+    /not in your session's tab groups/
   );
   await tabsClose({ tabId: a.data.id, sessionToken: a.data.sessionToken }); // own tab: fine
+});
+
+test("a foreign tab and a missing tab are indistinguishable", async () => {
+  const { tabsCreate, tabsClose } = await loadTabs(makeChrome());
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug" });
+
+  const foreign = await tabsClose({ tabId: a.data.id, sessionToken: b.data.sessionToken }).catch((e) => e.message);
+  const missing = await tabsClose({ tabId: 987654, sessionToken: b.data.sessionToken }).catch((e) => e.message);
+
+  // Differing errors would let an agent probe tab ids to map the browser.
+  assert.equal(foreign.replace(String(a.data.id), "N"), missing.replace("987654", "N"));
 });
 
 test("tabs_list without a sessionToken gives an instructive error; with one, only own tabs", async () => {
@@ -200,7 +212,7 @@ test("v1 (pre-session) storage migrates: visible to the user, unreachable by too
   await assert.rejects(() => tabsList({}), /sessionToken/);
   await assert.rejects(
     () => tabsClose({ tabId: 9, sessionToken: "some-new-token" }),
-    /different agent session/,
+    /not in your session's tab groups/,
     "legacy groups are not reachable through a fresh session"
   );
 });

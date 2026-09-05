@@ -45,7 +45,7 @@ the agent's workspace. Screenshot done. Now try:
 ```bash
 taskwindow doctor              # diagnose daemon, extension, versions, and agents
 taskwindow pair                # create a manual one-time pairing code
-taskwindow install --extension # repair or update only the extension
+taskwindow install             # re-run setup; also repairs and updates the extension
 taskwindow install --claude    # add Claude Code without repeating setup
 taskwindow install --cursor    # add Cursor without repeating setup
 taskwindow install --opencode  # add OpenCode without repeating setup
