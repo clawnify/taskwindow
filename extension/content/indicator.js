@@ -3,6 +3,12 @@
  * each interaction point and a pulsing inset glow, mirroring the reference
  * extension's layer. Both elements are pointer-events:none at max z-index;
  * the pulse respects prefers-reduced-motion. Injected on demand, top frame.
+ *
+ * Both stay visible for as long as the tab is being driven — no timed fade.
+ * The cursor is DOM, so it appears in screenshots (CDP mouse events draw no
+ * pointer), and an agent that moves the mouse, then screenshots to check the
+ * spot before clicking, must still find it there. They hide only on an
+ * explicit "hide" (sent when the debugger detaches from the tab).
  */
 (() => {
   if (globalThis.__agentTabIndicator) return;
@@ -15,7 +21,6 @@
   let cursor = null;
   let glow = null;
   let style = null;
-  let hideTimer = null;
 
   function ensure() {
     if (cursor) return;
@@ -45,13 +50,8 @@
     document.documentElement.appendChild(cursor);
   }
 
-  function showGlow(ms = 1600) {
+  function showGlow() {
     glow.style.opacity = "1";
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      glow.style.opacity = "0";
-      cursor.style.opacity = "0";
-    }, ms);
   }
 
   function moveTo(x, y) {
@@ -68,7 +68,7 @@
         moveTo(msg.x, msg.y);
       } else if (msg.op === "focus") {
         ensure();
-        showGlow(1200);
+        showGlow();
       } else if (msg.op === "hide") {
         if (glow) glow.style.opacity = "0";
         if (cursor) cursor.style.opacity = "0";

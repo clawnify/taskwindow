@@ -83,7 +83,8 @@ const rawDefs = [
       "Actions: screenshot (PNG of the viewport, or full page with fullPage), left_click / right_click / " +
       "middle_click / double_click / triple_click (at x,y), type (text into the focused element), " +
       "key (named key press, e.g. Enter, Tab, Escape, ArrowLeft, Backspace), scroll (by dx/dy pixels), " +
-      "mouse_move, wait. Coordinates come from the last screenshot. NOTE: while attached, Chrome shows a " +
+      "mouse_move, wait. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
+      "read x,y straight off the last screenshot. NOTE: while attached, Chrome shows a " +
       '"TaskWindow started debugging this browser" infobar — this is unavoidable with CDP-based control.',
     inputSchema: {
       action: z.enum([
@@ -196,6 +197,7 @@ const rawDefs = [
     name: "javascript_execute",
     description:
       "Run JavaScript in the page's main world (same context as the site's own scripts) and return the result. " +
+      "Evaluated over the DevTools protocol, so the page's Content Security Policy does not block it. " +
       "The final expression's value is returned if JSON-serializable. Use sparingly — prefer read_page/find/form_input.",
     inputSchema: {
       code: z.string().describe("JavaScript source to evaluate, e.g. \"document.title\""),
