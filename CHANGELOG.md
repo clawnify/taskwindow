@@ -5,7 +5,37 @@ write these for users. Add the version's section before tagging.
 
 ## 0.2.2
 
+This one changes the extension, so updating the daemon alone is not enough:
+after `taskwindow install`, reload TaskWindow in `chrome://extensions`.
+`taskwindow doctor` flags the mismatch until you do.
+
+### Added
+
+**`reload`.** Reloads a tab in place (optionally bypassing the cache) and waits
+for the load event. There was no way to refresh a page: `tabs_create` is the
+first tool every agent learns and needs no tab id, so "check the page again"
+turned into a second tab at the same URL, every iteration. `tabs_create` now
+says so and points at `reload`/`navigate` for a page you already have open.
+
 ### Fixed
+
+**Opening a tab no longer steals focus.** `tabs_create` focused the agent
+window on every call — the default `active: true` ran
+`windows.update({ focused: true })`, which also brings Chrome to the front — so
+each tab an agent opened pulled you out of your own window, or out of your
+terminal. `active` now means active *within* the agent window, so the page
+renders and screenshots work; whatever you were in keeps focus. Click the agent
+window when you want to watch.
+
+**Mouse input no longer stalls when the agent window isn't in front.** Chrome
+stops producing frames for a tab that is inactive or whose window is covered,
+and DevTools holds a wheel event until the next frame — so `scroll` hung for
+30 s and `mouse_move`/clicks took 5 s whenever you were looking at something
+else, which the focus fix above makes the normal case. The page is now kept
+rendering with CDP focus emulation (what Playwright does by default; the
+equivalent launch flags aren't available to an extension), and a mouse action
+first makes its tab the active one in the agent window. Keys and screenshots
+were never affected.
 
 **A tab's existence no longer leaks across sessions.** Passing another session's
 tab id returned *"belongs to a different agent session"* while an unused id
@@ -17,6 +47,15 @@ claims the tab belongs to another agent: it may equally be one of your own.
 now shares the single guarded path.
 
 ### Changed
+
+**Agents share one window.** Every new task used to open another Chrome window,
+even within one session. A window holds many tab groups, so a task now joins
+the window the agent is already working in — concurrent agents included — and
+only the very first creates one. A pinned *TaskWindow workspace* tab anchors
+that window: Chrome closes a window with its last tab, and one task finishing
+must not take the shared window, and wherever you put it, away from everyone
+else. No agent can close the anchor, since it sits outside every group. Close it
+yourself if you want the window gone; the next task simply opens a fresh one.
 
 `taskwindow install` is documented as the one command that installs, repairs and
 updates the extension. `taskwindow doctor` used to point at `taskwindow install

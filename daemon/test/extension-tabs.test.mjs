@@ -23,12 +23,25 @@ function makeChrome() {
   const tabs = new Map(); // tabId -> { id, windowId: 1, groupId: -1, url, title: "", active: true }
   let nextTabId = 1;
   let nextGroupId = 100;
+  let nextWindowId = 2; // window 1 is the user's
+  const windowFocus = []; // window ids handed {focused:true}
+  const windowsCreated = []; // opts passed to windows.create
+
+  function createTab({ url, active = true, windowId = 1 }) {
+    const id = nextTabId++;
+    const tab = { id, windowId, groupId: -1, url, title: "", active, pinned: false };
+    tabs.set(id, tab);
+    return tab;
+  }
 
   return {
     storage,
     groups,
     tabs,
+    windowFocus,
+    windowsCreated,
     chrome: {
+      runtime: { getURL: (path) => `chrome-extension://test/${path}` },
       storage: {
         local: {
           async get(keys) {
@@ -60,11 +73,8 @@ function makeChrome() {
         },
       },
       tabs: {
-        async create({ url, active = true, windowId = 1 }) {
-          const id = nextTabId++;
-          const tab = { id, windowId, groupId: -1, url, title: "", active };
-          tabs.set(id, tab);
-          return tab;
+        async create(opts) {
+          return createTab(opts);
         },
         async get(id) {
           const t = tabs.get(id);
@@ -80,7 +90,10 @@ function makeChrome() {
           return all.filter(
             (t) =>
               (q.groupId === undefined || t.groupId === q.groupId) &&
-              (q.active === undefined || t.active === q.active)
+              (q.active === undefined || t.active === q.active) &&
+              (q.url === undefined || t.url === q.url) &&
+              (q.pinned === undefined || t.pinned === q.pinned) &&
+              (q.windowId === undefined || t.windowId === q.windowId)
           );
         },
         async group({ tabIds, groupId }) {
@@ -101,9 +114,14 @@ function makeChrome() {
         async getLastFocused() {
           return { id: 1 };
         },
-        async update() {},
+        async update(id, props) {
+          if (props?.focused) windowFocus.push(id);
+        },
         async create(opts) {
-          return { id: 1, tabs: [] };
+          windowsCreated.push(opts);
+          const id = nextWindowId++;
+          const created = opts?.url ? [createTab({ url: opts.url, active: true, windowId: id })] : [];
+          return { id, tabs: created };
         },
       },
     },
@@ -164,6 +182,73 @@ test("a foreign tab and a missing tab are indistinguishable", async () => {
 
   // Differing errors would let an agent probe tab ids to map the browser.
   assert.equal(foreign.replace(String(a.data.id), "N"), missing.replace("987654", "N"));
+});
+
+test("tasks from any session share one agent window; only the first opens it", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug" }); // another agent
+  const c = await tabsCreate({ url: "https://c.example", task: "Third thing", sessionToken: a.data.sessionToken });
+
+  assert.equal(a.data.newWindow, true, "the very first task opens the window");
+  assert.equal(b.data.newWindow, false);
+  assert.equal(c.data.newWindow, false);
+  const wid = mock.tabs.get(a.data.id).windowId;
+  assert.notEqual(wid, 1, "never the user's window");
+  assert.equal(mock.tabs.get(b.data.id).windowId, wid);
+  assert.equal(mock.tabs.get(c.data.id).windowId, wid);
+});
+
+test("the agent window outlives its last task: a pinned anchor stays, and no agent can close it", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, tabsClose } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  const wid = mock.tabs.get(a.data.id).windowId;
+
+  await tabsClose({ tabId: a.data.id, sessionToken: a.data.sessionToken });
+  const left = [...mock.tabs.values()].filter((t) => t.windowId === wid);
+  assert.equal(left.length, 1, "only the anchor remains, so Chrome keeps the window");
+  assert.equal(left[0].pinned, true);
+  assert.equal(left[0].groupId, -1, "the anchor is outside every group");
+  await assert.rejects(
+    () => tabsClose({ tabId: left[0].id, sessionToken: a.data.sessionToken }),
+    /not in your session's tab groups/
+  );
+
+  // The next task rejoins that window instead of opening another.
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug" });
+  assert.equal(b.data.newWindow, false);
+  assert.equal(mock.tabs.get(b.data.id).windowId, wid);
+});
+
+test("opening a URL the group already has is allowed but called out", async () => {
+  const { tabsCreate } = await loadTabs(makeChrome());
+  const a = await tabsCreate({ url: "https://app.example/deals", task: "CRM" });
+  const b = await tabsCreate({ url: "https://app.example/deals#top", task: "CRM", sessionToken: a.data.sessionToken });
+  assert.notEqual(b.data.id, a.data.id, "not deduped: the second tab really opens");
+  assert.deepEqual(b.data.alreadyOpenIn, [a.data.id], "fragment ignored when matching");
+  assert.match(b.text, /already had tab \d+ at this URL/);
+  assert.match(b.text, /reload or navigate/);
+  const c = await tabsCreate({ url: "https://app.example/contacts", task: "CRM", sessionToken: a.data.sessionToken });
+  assert.deepEqual(c.data.alreadyOpenIn, []);
+  assert.doesNotMatch(c.text, /already had/);
+});
+
+test("opening a tab never takes focus from the user's window", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", active: true }); // opens the window
+  await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: a.data.sessionToken, active: true }); // joins it
+
+  assert.equal(mock.windowsCreated.length, 1);
+  assert.equal(mock.windowsCreated[0].focused, false, "the agent window is created unfocused");
+  // Focus may only ever be handed *back* to the user's window (id 1), never given to an agent window.
+  assert.ok(mock.windowFocus.every((id) => id === 1), `focused agent window(s): ${mock.windowFocus}`);
+  assert.equal(mock.tabs.get(a.data.id).active, true, "active still means active within the agent window");
 });
 
 test("tabs_list without a sessionToken gives an instructive error; with one, only own tabs", async () => {

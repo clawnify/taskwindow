@@ -95,6 +95,15 @@ export async function computer(params) {
     return { text: `waited ${ms}ms` };
   }
 
+  // CDP mouse input only reaches the tab that is active in its window: an
+  // inactive tab's widget is hidden, so the event ack stalls for seconds and a
+  // wheel event never returns. With several tasks (and agents) sharing one
+  // window that is the normal case, so activate first. This changes which tab
+  // the agent window shows — never which window has focus.
+  if (!tab.active && action !== "type" && action !== "key") {
+    await chrome.tabs.update(tab.id, { active: true });
+  }
+
   return withDebugger(tab.id, async (tabId) => {
     switch (action) {
       case "left_click":

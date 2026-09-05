@@ -36,8 +36,9 @@ connected.
 
 Ask your agent: *"Open example.com in a new tab and take a screenshot."*
 
-A green tab group named after your task appears in its own window — that's
-the agent's workspace. Screenshot done. Now try:
+A green tab group named after your task appears in a separate TaskWindow
+window — the agents' workspace, shared by every task and every agent, and kept
+open by a pinned tab no agent can close. Screenshot done. Now try:
 *"Find the sign-up link and read the page's headings."*
 
 ### Repair and advanced commands
@@ -60,7 +61,7 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
 | Area | Tools |
 |---|---|
 | Status | `taskwindow_status` (daemon/extension readiness and recovery guidance) |
-| Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate` |
+| Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate`, `reload` |
 | See | `computer` (screenshot + click/type/key/scroll), `read_page`, `find`, `get_page_text` |
 | Act | `form_input`, `file_upload`, `upload_image`, `javascript_execute` |
 | Debug | `read_console_messages`, `read_network_requests` |

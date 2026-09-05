@@ -36,14 +36,15 @@ const rawDefs = [
     description:
       "Open a new tab in a task-named tab group (in the agent's own window). Requires a \"task\" name saying what the group is about; " +
       "same task name in the same session reuses that group. Returns a sessionToken — pass it as \"sessionToken\" in every subsequent " +
-      "browser tool call; concurrent agents' sessions never share tabs.",
+      "browser tool call; concurrent agents' sessions never share tabs. Don't open a second tab for a page you already have: " +
+      "use reload or navigate on the existing tab (see tabs_list).",
     inputSchema: {
       url: z.string().url().describe("URL to open (include the scheme, e.g. https://...)"),
       task: z
         .string()
         .min(1)
         .describe('Task name for the tab group — required; says what the group is about, e.g. "Research competitors".'),
-      active: z.boolean().optional().describe("Bring the new tab to the front (default true)"),
+      active: z.boolean().optional().describe("Make it the active tab of the agent window (default true). Never focuses that window: the user's window and app keep focus."),
       sessionToken: z
         .string()
         .optional()
@@ -62,6 +63,17 @@ const rawDefs = [
     description:
       "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title.",
     inputSchema: { url: z.string().url(), tabId: tabId.optional() },
+    timeoutMs: 30_000,
+  },
+  {
+    name: "reload",
+    description:
+      "Reload a tab in place, like the browser's reload button, and wait (up to 10s) for the load event. " +
+      "Use this — not tabs_create — to refresh a page you already have open.",
+    inputSchema: {
+      tabId: tabId.optional(),
+      bypassCache: z.boolean().optional().describe("Skip the HTTP cache, like a hard reload (default false)"),
+    },
     timeoutMs: 30_000,
   },
   {
