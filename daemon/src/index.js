@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
@@ -174,11 +174,53 @@ function installedExtensionVersion() {
   }
 }
 
+/**
+ * The `taskwindow` that PATH resolves to, if it isn't this one. Global installs
+ * under different Node versions (nvm, Homebrew, /usr/local) leave older copies
+ * behind, and an older copy earlier on PATH silently runs instead of the one
+ * `npm install -g taskwindow@latest` just put down — a pre-`doctor` version
+ * even falls through to daemon mode and dies on the busy port.
+ */
+function shadowingInstall() {
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const self = real(process.argv[1]);
+  for (const dir of (process.env.PATH || "").split(delimiter)) {
+    if (!dir) continue;
+    const bin = join(dir, "taskwindow");
+    if (!existsSync(bin)) continue;
+    const target = real(bin);
+    if (!target || target === self) return null; // first hit is us: no shadow
+    let version = "unknown";
+    try {
+      version = JSON.parse(readFileSync(join(dirname(target), "..", "package.json"), "utf8")).version || version;
+    } catch {}
+    return { bin, version };
+  }
+  return null;
+}
+
+function warnIfShadowed() {
+  const other = shadowingInstall();
+  if (!other) return false;
+  console.log(
+    `✗ \`taskwindow\` on your PATH is v${other.version} at ${other.bin}, not this v${VERSION} — ` +
+      `remove it (npm uninstall -g taskwindow with the npm that owns that prefix, or delete the link) so commands run the current version`
+  );
+  return true;
+}
+
 async function runDoctor(config) {
   const health = await readHealth(config.port);
   const installedVersion = installedExtensionVersion();
   const agents = inspectAgents();
   console.log(`TaskWindow doctor (CLI v${VERSION})`);
+  warnIfShadowed();
   if (health) {
     const versionNote = health.version === VERSION ? "" : ` — CLI is v${VERSION}; run taskwindow install to update`;
     console.log(`✓ Daemon running (v${health.version}, port ${health.port})${versionNote}`);
@@ -236,6 +278,7 @@ try {
     } else if (fullInstall) {
       console.log("[taskwindow] daemon and coding-agent setup complete (--no-extension selected)");
     }
+    warnIfShadowed();
     process.exit(ready ? 0 : 1);
   }
   if (verb === "pair") {

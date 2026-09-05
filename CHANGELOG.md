@@ -3,6 +3,17 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**`doctor` and `install` warn when an older `taskwindow` shadows this one.**
+Global installs under different Node versions leave older copies behind, and if
+one sits earlier on PATH it silently runs instead of the version you just
+installed — a pre-`doctor` copy even falls through to daemon mode and dies with
+`EADDRINUSE`. Both commands now name the shadowing binary and its version, and
+say how to remove it.
+
 ## 0.2.3
 
 Extension-side again: after `taskwindow install`, reload TaskWindow in
