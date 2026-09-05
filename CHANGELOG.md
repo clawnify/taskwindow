@@ -5,7 +5,33 @@ write these for users. Add the version's section before tagging.
 
 ## Unreleased
 
+Extension-side: after `taskwindow install`, reload TaskWindow in
+`chrome://extensions`.
+
 ### Fixed
+
+**Screenshot coordinates now match click coordinates on Retina and zoomed
+pages.** `computer` screenshots were rendered in device pixels while clicks,
+scrolls and mouse moves are dispatched in CSS pixels, so on a 2x display every
+coordinate read off a screenshot landed twice too far right and down — off the
+button, or off the viewport entirely. Agents clicked "send" and nothing
+happened, then pressed Enter into nothing. Screenshots are now captured at
+1 image pixel per CSS pixel, so x,y read off them can be used as-is; the
+result text says so. A newly created agent window also opens at 1280x900, so
+that 1:1 screenshot stays within the resolution vision models see natively
+instead of being downscaled on the way in (resize the window if you want more).
+
+**The on-page cursor and glow no longer fade out mid-task.** They used to
+disappear about 1.6s after each action, so an agent that moved the mouse and
+then took a screenshot to check the spot before clicking often found nothing to
+check. Both now stay up for as long as the tab is being driven and go away when
+TaskWindow detaches from the tab.
+
+**`javascript_execute` works on sites with a strict Content Security Policy.**
+It ran the code through `eval` inside the page, which x.com, reddit.com, GitHub
+and any other site without `'unsafe-eval'` reject. It now evaluates over the
+DevTools protocol like the DevTools console, which the page's CSP cannot block.
+
 
 **`doctor` and `install` warn when an older `taskwindow` shadows this one.**
 Global installs under different Node versions leave older copies behind, and if

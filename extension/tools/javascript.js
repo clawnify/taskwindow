@@ -1,46 +1,33 @@
 import { resolveTab } from "./tabs.js";
+import { withDebugger, send } from "./cdp.js";
 
-// MAIN world only: execution is `eval(src)` below, and in an ISOLATED world that
-// runs under the extension's own CSP, which MV3 forbids from allowing
-// unsafe-eval — it fails on every page, not just strict ones. Running arbitrary
-// source in an isolated world would need Page.createIsolatedWorld +
-// Runtime.evaluate over CDP instead.
+// Evaluated over CDP (Runtime.evaluate), the same path the DevTools console
+// uses: it runs in the page's main world and is exempt from the page's Content
+// Security Policy. The earlier chrome.scripting + eval(src) approach was
+// subject to that CSP, so every site without 'unsafe-eval' (x.com, reddit.com,
+// GitHub, …) rejected the tool outright.
 export async function javascriptExecute({ code, awaitPromise = true, tabId, sessionToken }) {
   const tab = await resolveTab(tabId, sessionToken);
-  const [injection] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    world: "MAIN",
-    injectImmediately: true,
-    func: async (src, waitFor) => {
-      const jsonify = (v) => {
-        try {
-          if (v === undefined) return null;
-          if (v === null || typeof v !== "object") return v;
-          return JSON.parse(JSON.stringify(v));
-        } catch {
-          try {
-            return String(v);
-          } catch {
-            return "[unserializable]";
-          }
-        }
-      };
-      try {
-        let result = eval(src);
-        if (waitFor && result && typeof result.then === "function") result = await result;
-        return { ok: true, value: jsonify(result) };
-      } catch (err) {
-        return { ok: false, error: String((err && err.message) || err) };
-      }
-    },
-    args: [code, awaitPromise !== false],
+  return withDebugger(tab.id, async (tid) => {
+    const { result, exceptionDetails } = await send(tid, "Runtime.evaluate", {
+      expression: code,
+      awaitPromise: awaitPromise !== false,
+      returnByValue: true,
+      userGesture: true,
+    });
+    if (exceptionDetails) {
+      const detail = exceptionDetails.exception?.description || exceptionDetails.text || "Uncaught exception";
+      throw new Error(`page script threw: ${detail}`);
+    }
+    let value = result?.value;
+    if (value === undefined) {
+      // Non-JSON results (undefined, functions, symbols, DOM nodes…): fall
+      // back to the description, or null so the result stays serializable.
+      value = result?.unserializableValue ?? result?.description ?? null;
+    }
+    return {
+      data: { result: value },
+      text: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+    };
   });
-
-  const outcome = injection?.result;
-  if (!outcome) throw new Error("script returned nothing (page may block script injection)");
-  if (outcome.ok === false) throw new Error(`page script threw: ${outcome.error}`);
-  return {
-    data: { result: outcome.value },
-    text: typeof outcome.value === "string" ? outcome.value : JSON.stringify(outcome.value, null, 2),
-  };
 }

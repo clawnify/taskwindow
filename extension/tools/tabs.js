@@ -549,7 +549,11 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
       // group. Chrome drops a window with its last tab, and one task finishing
       // must not take the shared window (and wherever the user put it) away
       // from every other agent — and no agent can close a tab it can't reach.
-      const win = await chrome.windows.create({ url: workspaceUrl(), focused: false });
+      // Sized so a 1:1 CSS-pixel screenshot stays under the vision models'
+      // native resolution (~1568px long edge): a wider viewport is downscaled
+      // by the model API, and the coordinates it reads off the image drift.
+      // Chrome clamps to the screen; the user may resize the window later.
+      const win = await chrome.windows.create({ url: workspaceUrl(), focused: false, width: 1280, height: 900 });
       const anchor = win.tabs?.[0];
       if (!anchor) throw new Error("window was created but Chrome returned no tab");
       await chrome.tabs.update(anchor.id, { pinned: true });

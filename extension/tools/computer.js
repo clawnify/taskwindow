@@ -49,6 +49,20 @@ function keySpec(name) {
   return { key, code, windowsVirtualKeyCode: vk, modifiers, text: keyName.length === 1 ? keyName : undefined };
 }
 
+/** Page zoom and HiDPI both fold into window.devicePixelRatio; 1 when unreadable. */
+async function devicePixelRatio(tabId) {
+  try {
+    const { result } = await send(tabId, "Runtime.evaluate", {
+      expression: "window.devicePixelRatio",
+      returnByValue: true,
+    });
+    const dpr = Number(result?.value);
+    return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  } catch {
+    return 1;
+  }
+}
+
 function readPngDimensions(b64) {
   try {
     // PNG IHDR: width/height are big-endian uint32 at offsets 16 and 20.
@@ -77,14 +91,30 @@ export async function computer(params) {
 
   if (action === "screenshot") {
     return withDebugger(tab.id, async (tabId) => {
+      // Input.dispatchMouseEvent takes CSS pixels, but Page.captureScreenshot
+      // renders device pixels: on a Retina display (or a zoomed page) the raw
+      // image is 2x the coordinate space, so a click read off it lands ~2x too
+      // far right and down — off the button, or off the viewport. Clip at
+      // 1/devicePixelRatio so one image pixel is one coordinate unit. The clip
+      // is document-relative (as Playwright's takeScreenshot does it), so a
+      // viewport shot starts at the current scroll offset, not the page top.
+      const { cssLayoutViewport: layout, cssVisualViewport: visual, cssContentSize: content } =
+        await send(tabId, "Page.getLayoutMetrics");
+      const dpr = await devicePixelRatio(tabId);
+      const clip = params.fullPage
+        ? { x: 0, y: 0, width: content.width, height: content.height }
+        : { x: visual.pageX, y: visual.pageY, width: layout.clientWidth, height: layout.clientHeight };
+      clip.width = Math.max(1, Math.round(clip.width));
+      clip.height = Math.max(1, Math.round(clip.height));
       const shot = await send(tabId, "Page.captureScreenshot", {
         format: "png",
         captureBeyondViewport: !!params.fullPage,
+        clip: { ...clip, scale: 1 / dpr },
       });
       const dims = readPngDimensions(shot.data);
       return {
         image: { data: shot.data, mimeType: "image/png" },
-        text: `screenshot of tab ${tabId}${dims ? ` (${dims.width}x${dims.height})` : ""}${params.fullPage ? " (full page)" : " (viewport)"}`,
+        text: `screenshot of tab ${tabId}${dims ? ` (${dims.width}x${dims.height} CSS px — 1 image px = 1 coordinate unit)` : ""}${params.fullPage ? " (full page)" : " (viewport)"}`,
       };
     });
   }

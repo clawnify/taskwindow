@@ -138,7 +138,12 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 });
 
 chrome.debugger.onDetach.addListener((source) => {
-  if (source?.tabId != null) ATTACHED.delete(source.tabId);
+  const tabId = source?.tabId;
+  if (tabId == null) return;
+  ATTACHED.delete(tabId);
+  // The tab is no longer being driven: take the cursor/glow indicator down
+  // (it otherwise stays up so screenshots can show where the mouse is).
+  chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", op: "hide" }).catch(() => {});
 });
 
 export async function ensureAttached(tabId) {
