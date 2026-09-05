@@ -307,7 +307,8 @@ function toMcpResult(result) {
   return { content };
 }
 
-export function registerTools(server, { bridge, version, logger = console }) {
+export function registerTools(server, { bridge, version, updates = null, logger = console }) {
+  const notice = () => updates?.notice({ extensionVersion: bridge.lastHello?.version || null }) ?? null;
   for (const def of toolDefs) {
     server.registerTool(def.name, { description: def.description, inputSchema: def.inputSchema }, async (args) => {
       try {
@@ -317,17 +318,27 @@ export function registerTools(server, { bridge, version, logger = console }) {
             data: {
               daemon: "running",
               daemonVersion: version,
+              latestVersion: updates?.latest ?? null,
               extensionConnected: connected,
               extensionVersion: bridge.lastHello?.version || null,
               recovery: connected
                 ? null
                 : "Open Chrome and enable TaskWindow. If it remains disconnected, run `taskwindow doctor`, then `taskwindow pair`.",
+              update: notice(),
             },
           });
         }
         if (def.name === "browser_batch") return await runBatch(args, bridge, logger);
         const result = await bridge.sendTool(def.name, args, def.timeoutMs);
-        return toMcpResult(result);
+        const mcp = toMcpResult(result);
+        // tabs_create is the first call of every agent session, so a newer
+        // release (or a stale extension) is mentioned once per session, here,
+        // instead of on every response.
+        if (def.name === "tabs_create") {
+          const line = notice();
+          if (line) mcp.content.push({ type: "text", text: line });
+        }
+        return mcp;
       } catch (err) {
         logger.error(`[mcp] ${def.name} failed:`, err.message);
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };

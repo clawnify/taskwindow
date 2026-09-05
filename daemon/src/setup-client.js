@@ -58,3 +58,28 @@ export async function requestPairCode({ port, token }) {
   return body;
 }
 
+/** Extension connected and running exactly `version` (after an update/reload). */
+export function waitForExtensionVersion(port, version, timeoutMs = 90_000) {
+  return waitForHealth(port, (health) => health.extensionConnected === true && health.extensionVersion === version, timeoutMs);
+}
+
+/**
+ * Ask the daemon to have the extension reload itself (re-reads the unpacked
+ * files from disk). Resolves {ok:true} or {ok:false, error} — an extension
+ * that predates the reload handler answers "Unknown tool", and a daemon that
+ * predates the endpoint answers 404; both mean "reload by hand".
+ */
+export async function requestExtensionReload({ port, token }) {
+  try {
+    const response = await fetchWithTimeout(
+      `http://127.0.0.1:${port}/extension/reload`,
+      { method: "POST", headers: { authorization: `Bearer ${token}` } },
+      10_000
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: body.error || `HTTP ${response.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}

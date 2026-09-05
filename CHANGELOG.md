@@ -3,10 +3,26 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
-## Unreleased
+## 0.2.4
 
-Extension-side: after `taskwindow install`, reload TaskWindow in
-`chrome://extensions`.
+Extension-side. Coming from 0.2.3 or older: `npm install -g taskwindow@latest`,
+then `taskwindow update` — it refreshes the extension files and reloads the
+extension for you (older extensions get told the one click that remains).
+
+### Added
+
+**`taskwindow update`.** One non-interactive command brings the daemon and the
+extension to the latest release: installs the npm package into the prefix the
+current one lives in (not whichever npm is first on PATH), refreshes the
+unpacked extension files, restarts the daemon, and has the extension reload
+itself. Open tabs survive. Agents may run it, with your permission.
+
+**Agents learn about new versions.** The daemon asks the npm registry for the
+latest version at most once a day and, when there is one (or the extension
+lags the daemon), says so once per agent session — in the `tabs_create` result
+and in `taskwindow_status` — telling the agent to ask you before running
+`taskwindow update`. `doctor` shows it too. Disable with
+`~/.taskwindow/no-update-check`.
 
 ### Fixed
 

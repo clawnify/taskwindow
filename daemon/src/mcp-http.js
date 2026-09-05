@@ -7,10 +7,10 @@ import { registerTools } from "./tools.js";
  * server+transport pair. No session state — any MCP client that speaks
  * Streamable HTTP can hit it.
  */
-export function createMcpRequestHandler({ bridge, version, logger = console }) {
+export function createMcpRequestHandler({ bridge, version, updates = null, logger = console }) {
   return async function handleMcpRequest(req, res, parsedBody) {
     const server = new McpServer({ name: "taskwindow", version });
-    registerTools(server, { bridge, version, logger });
+    registerTools(server, { bridge, version, updates, logger });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

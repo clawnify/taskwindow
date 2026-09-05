@@ -5,7 +5,7 @@
  */
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { chmodSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { chmodSync, writeFileSync, unlinkSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 
 const LABEL = "com.clawnify.taskwindow";
@@ -121,11 +121,51 @@ WantedBy=default.target
  * programmatic unpacked installs, so a human does the final 3 clicks — the
  * command does everything else.
  */
+/**
+ * Download the extension zip of one release (`version` like "0.2.4"; omit for
+ * the latest release). Returns the local zip path.
+ */
+export function downloadExtensionZip(version) {
+  const releaseApi = version
+    ? `https://api.github.com/repos/clawnify/taskwindow/releases/tags/v${version}`
+    : "https://api.github.com/repos/clawnify/taskwindow/releases/latest";
+  try {
+    const release = JSON.parse(execFileSync("curl", ["-sL", releaseApi], { maxBuffer: 20e6 }).toString());
+    const asset = (release.assets || []).find((a) => a.name.startsWith("TaskWindow-extension-"));
+    if (!asset) throw new Error(`no extension asset in the ${version ? `v${version}` : "latest"} release`);
+    mkdirSync(join(homedir(), ".taskwindow"), { recursive: true });
+    const zipPath = join(homedir(), ".taskwindow", asset.name);
+    execFileSync("curl", ["-sL", "-o", zipPath, asset.browser_download_url]);
+    console.log(`[taskwindow] downloaded ${asset.name}`);
+    return zipPath;
+  } catch (err) {
+    throw new Error(
+      `couldn't download the extension zip (${err.message}). Download it from ` +
+        "https://github.com/clawnify/taskwindow/releases and re-run with --extension <zip>"
+    );
+  }
+}
+
+/**
+ * Replace the unpacked extension files with a zip's contents. The folder path
+ * is what Chrome has loaded, so it is kept and emptied rather than recreated;
+ * emptying first means files dropped by the new version don't linger.
+ */
+export function refreshExtensionFiles(zipPath) {
+  const extDir = extensionInstallDir();
+  mkdirSync(extDir, { recursive: true });
+  for (const entry of readdirSync(extDir)) {
+    if (entry === BOOTSTRAP_FILENAME) continue;
+    rmSync(join(extDir, entry), { recursive: true, force: true });
+  }
+  execFileSync("unzip", ["-oq", zipPath, "-d", extDir]);
+  return extDir;
+}
+
 export function installExtension(zipPath, { port, pairingCode } = {}) {
   // This folder must remain visible in macOS's file picker: Chrome asks the
   // user to select it after clicking "Load unpacked", and Finder hides paths
   // whose names begin with a period by default.
-  const extDir = extensionInstallDir();
   const open = (u) => {
     try {
       execFileSync("open", ["-a", "Google Chrome", u]);
@@ -135,26 +175,7 @@ export function installExtension(zipPath, { port, pairingCode } = {}) {
     }
   };
 
-  if (!zipPath) {
-    // No zip given: fetch the latest release asset from GitHub.
-    try {
-      const api = "https://api.github.com/repos/clawnify/taskwindow/releases/latest";
-      const release = JSON.parse(execFileSync("curl", ["-sL", api], { maxBuffer: 20e6 }).toString());
-      const asset = (release.assets || []).find((a) => a.name.startsWith("TaskWindow-extension-"));
-      if (!asset) throw new Error("no extension asset in the latest release");
-      zipPath = join(homedir(), ".taskwindow", asset.name);
-      execFileSync("curl", ["-sL", "-o", zipPath, asset.browser_download_url]);
-      console.log(`[taskwindow] downloaded ${asset.name}`);
-    } catch (err) {
-      throw new Error(
-        `couldn't download the extension zip (${err.message}). Download it from ` +
-          "https://github.com/clawnify/taskwindow/releases and re-run with --extension <zip>"
-      );
-    }
-  }
-
-  mkdirSync(extDir, { recursive: true });
-  execFileSync("unzip", ["-oq", zipPath, "-d", extDir]);
+  const extDir = refreshExtensionFiles(zipPath || downloadExtensionZip());
   if (pairingCode && port) {
     const bootstrapPath = extensionBootstrapPath();
     writeFileSync(bootstrapPath, JSON.stringify({ code: pairingCode, port }, null, 2) + "\n", { mode: 0o600 });

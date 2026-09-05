@@ -2,7 +2,8 @@
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { Bridge } from "./bridge.js";
 import { createMcpRequestHandler } from "./mcp-http.js";
@@ -11,10 +12,20 @@ import {
   installService,
   uninstallService,
   installExtension,
+  downloadExtensionZip,
+  refreshExtensionFiles,
   removeExtensionBootstrap,
 } from "./service.js";
 import { PairingManager } from "./pairing.js";
-import { readHealth, requestPairCode, waitForDaemon, waitForExtension } from "./setup-client.js";
+import {
+  readHealth,
+  requestPairCode,
+  requestExtensionReload,
+  waitForDaemon,
+  waitForExtension,
+  waitForExtensionVersion,
+} from "./setup-client.js";
+import { UpdateChecker, fetchLatestVersion, isNewer, readUpdateState, updateCheckDisabled } from "./updates.js";
 import { createRequire } from "node:module";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
@@ -221,8 +232,10 @@ async function runDoctor(config) {
   const agents = inspectAgents();
   console.log(`TaskWindow doctor (CLI v${VERSION})`);
   warnIfShadowed();
+  const known = updateCheckDisabled(config.dir) ? null : (health?.latestVersion || readUpdateState(config.dir).latest);
+  if (known && isNewer(known, VERSION)) console.log(`↑ TaskWindow v${known} is available (CLI v${VERSION}) — run: taskwindow update`);
   if (health) {
-    const versionNote = health.version === VERSION ? "" : ` — CLI is v${VERSION}; run taskwindow install to update`;
+    const versionNote = health.version === VERSION ? "" : ` — CLI is v${VERSION}; run taskwindow update`;
     console.log(`✓ Daemon running (v${health.version}, port ${health.port})${versionNote}`);
   } else {
     console.log("✗ Daemon not running — run: taskwindow install");
@@ -231,7 +244,7 @@ async function runDoctor(config) {
   else console.log("✗ Extension files not installed — run: taskwindow install");
   if (health?.extensionConnected) {
     const versionNote = installedVersion && health.extensionVersion && installedVersion !== health.extensionVersion
-      ? ` — installed files are v${installedVersion}; reload the extension in Chrome`
+      ? ` — installed files are v${installedVersion}; run taskwindow update (or reload the extension in Chrome)`
       : "";
     console.log(`✓ Chrome extension connected (v${health.extensionVersion || "unknown"})${versionNote}`);
   } else {
@@ -246,7 +259,97 @@ async function runDoctor(config) {
   return !!health && health.extensionConnected === true;
 }
 
+/**
+ * The global npm install this CLI runs from: its prefix and the npm that owns
+ * it. `npm install -g` with the npm on PATH can belong to another Node (nvm,
+ * Homebrew, /usr/local) and would plant a second copy — the shadowing problem
+ * — so updates target the prefix these files live under.
+ */
+function owningInstall() {
+  const self = realpathSync(process.argv[1]); // <prefix>/lib/node_modules/taskwindow/src/index.js
+  const pkgRoot = dirname(dirname(self));
+  const nodeModules = dirname(pkgRoot);
+  if (basename(nodeModules) !== "node_modules" || basename(pkgRoot) !== "taskwindow") {
+    throw new Error(`this taskwindow (${self}) is not a global npm install — update it the way you installed it`);
+  }
+  let prefix = dirname(nodeModules);
+  if (basename(prefix) === "lib") prefix = dirname(prefix);
+  const npm = [join(prefix, "bin", "npm"), join(dirname(process.execPath), "npm")].find((p) => existsSync(p)) || "npm";
+  return { prefix, npm };
+}
+
+function printManualReload() {
+  console.log("[taskwindow] the extension could not reload itself — in Chrome open chrome://extensions and click reload on TaskWindow");
+}
+
+/**
+ * `taskwindow update`: non-interactive, safe to run mid-session (agents run it
+ * with the user's OK). Stage 1 (old CLI): install the newer npm package into
+ * the owning prefix, then re-exec the NEW CLI for stage 2 so the rest runs on
+ * current code. Stage 2: refresh the extension files, restart the daemon on
+ * the new code, then have the extension reload itself — daemon first, because
+ * only the new daemon knows how to ask.
+ */
+async function runUpdate(config, flags) {
+  const force = flags.includes("--force");
+  const staged = flags.includes("--stage2");
+  const extFlag = flags.indexOf("--extension");
+  const zipArg = extFlag !== -1 && flags[extFlag + 1] && !flags[extFlag + 1].startsWith("--") ? flags[extFlag + 1] : null;
+
+  if (!staged) {
+    warnIfShadowed();
+    let latest = null;
+    try {
+      latest = await fetchLatestVersion();
+    } catch (err) {
+      console.log(`[taskwindow] couldn't reach the npm registry (${err.message}) — refreshing the local install only`);
+    }
+    if (latest && isNewer(latest, VERSION)) {
+      const { prefix, npm } = owningInstall();
+      console.log(`[taskwindow] updating v${VERSION} → v${latest} (${prefix})`);
+      execFileSync(npm, ["install", "-g", "--prefix", prefix, `taskwindow@${latest}`], { stdio: "inherit" });
+      const rest = ["update", "--stage2", ...flags.filter((f) => f !== "--force" || force)];
+      const child = spawnSync(process.execPath, [realpathSync(process.argv[1]), ...rest], { stdio: "inherit" });
+      return child.status === 0;
+    }
+    const health = await readHealth(config.port);
+    const filesVersion = installedExtensionVersion();
+    const current =
+      health?.version === VERSION &&
+      filesVersion === VERSION &&
+      (!health?.extensionConnected || health.extensionVersion === VERSION);
+    if (current && !force) {
+      console.log(`[taskwindow] already up to date (v${VERSION})${latest ? "" : " as far as the local install goes"}`);
+      return true;
+    }
+  }
+
+  // Stage 2 (or nothing newer on npm, but the local pieces disagree).
+  refreshExtensionFiles(zipArg || downloadExtensionZip(VERSION));
+  console.log(`[taskwindow] extension files refreshed (v${installedExtensionVersion() || "?"}, ${extensionInstallDir()})`);
+  await ensureDaemon(config, { forceInstall: true });
+  const health = await waitForExtension(config.port, 90_000);
+  if (!health) {
+    console.log("[taskwindow] the extension did not reconnect — enable TaskWindow in Chrome, then run: taskwindow doctor");
+    return false;
+  }
+  if (health.extensionVersion !== VERSION) {
+    const reload = await requestExtensionReload(config);
+    if (!reload.ok) {
+      printManualReload();
+    } else if (!(await waitForExtensionVersion(config.port, VERSION))) {
+      console.log("[taskwindow] the extension reloaded but has not reconnected on the new version yet");
+      printManualReload();
+    }
+  }
+  return runDoctor(config);
+}
+
 try {
+  if (verb === "update") {
+    const ok = await runUpdate(loadConfig(), flags);
+    process.exit(ok ? 0 : 1);
+  }
   if (verb === "install") {
     const config = loadConfig();
     const extFlag = flags.indexOf("--extension");
@@ -310,7 +413,10 @@ const config = loadConfig();
 const bridge = new Bridge({ token: config.token });
 const pairing = new PairingManager();
 
-const handleMcp = createMcpRequestHandler({ bridge, version: VERSION });
+const updates = new UpdateChecker({ version: VERSION, dir: config.dir });
+updates.start();
+
+const handleMcp = createMcpRequestHandler({ bridge, version: VERSION, updates });
 
 const pairFailures = []; // timestamps of failed attempts, rolling window
 const PAIR_WINDOW_MS = 60_000;
@@ -358,10 +464,32 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       ok: true,
       version: VERSION,
+      latestVersion: updates.latest,
       extensionConnected: bridge.connected,
       extensionVersion: bridge.lastHello?.version || null,
       port: config.port,
     });
+    return;
+  }
+
+  // `taskwindow update` asks the extension to reload itself (re-reading the
+  // unpacked files). Same bearer token as pairing requests; it rides the
+  // ordinary tool-call channel but is not an MCP tool, so agents can't call it.
+  if (url.pathname === "/extension/reload") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed; POST to reload the extension" });
+      return;
+    }
+    if (req.headers.authorization !== `Bearer ${config.token}`) {
+      sendJson(res, 401, { error: "invalid or missing bearer token" });
+      return;
+    }
+    try {
+      await bridge.sendTool("reload_extension", {}, 5000);
+      sendJson(res, 200, { ok: true });
+    } catch (err) {
+      sendJson(res, 503, { error: err.message });
+    }
     return;
   }
 

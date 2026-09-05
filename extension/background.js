@@ -6,7 +6,7 @@ import { javascriptExecute } from "./tools/javascript.js";
 import { readConsoleMessages, readNetworkRequests } from "./tools/console-net.js";
 import { gifRecord } from "./tools/gif.js";
 import { shortcutsList, shortcutsExecute } from "./tools/shortcuts.js";
-import { connectWs, isConnected } from "./tools/connection.js";
+import { connectWs, isConnected, reloadExtension } from "./tools/connection.js";
 import { initGroupReaper } from "./tools/tabs.js";
 
 const VERSION = chrome.runtime.getManifest().version;
@@ -31,6 +31,7 @@ const HANDLERS = {
   gif_record: gifRecord,
   shortcuts_list: shortcutsList,
   shortcuts_execute: (params) => shortcutsExecute(params, dispatchTool),
+  reload_extension: reloadExtension, // daemon-only (taskwindow update); no MCP tool exposes it
 };
 
 async function dispatchTool(tool, params) {

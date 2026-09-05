@@ -5,6 +5,7 @@
  * extension-disconnect and auth-negative cases.
  */
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -47,6 +48,15 @@ async function waitFor(url, probe, ms = 15_000) {
     await new Promise((r) => setTimeout(r, 200));
   }
 }
+
+// A stand-in npm registry that always knows a newer version, so the update
+// notice path runs end to end without the network.
+const registry = createServer((req, res) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ latest: "9.9.9" }));
+});
+await new Promise((resolve) => registry.listen(0, "127.0.0.1", resolve));
+env.TASKWINDOW_UPDATE_CHECK_URL = `http://127.0.0.1:${registry.address().port}/dist-tags`;
 
 const daemon = run(process.execPath, [join(root, "src", "index.js")]);
 let fakeExt = null;
@@ -137,6 +147,7 @@ try {
   if (fakeExt) console.error("fake-ext output:\n" + fakeExt.getOut());
   exitCode = 1;
 } finally {
+  registry.close();
   daemon.child.kill();
   if (fakeExt) fakeExt.child.kill();
   if (flaky) flaky.child.kill();

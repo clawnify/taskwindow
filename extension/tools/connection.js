@@ -142,3 +142,14 @@ async function connect() {
     } catch {}
   };
 }
+
+/**
+ * Reload the extension itself so Chrome re-reads the unpacked files
+ * (`taskwindow update` calls this through the daemon; it is not an MCP tool).
+ * The result is sent first — the reload tears this worker down — and Chrome
+ * only objects to reloads repeated within a second, not to one.
+ */
+export async function reloadExtension() {
+  setTimeout(() => chrome.runtime.reload(), 200);
+  return { text: `extension ${version} reloading` };
+}
