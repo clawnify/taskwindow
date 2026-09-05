@@ -111,6 +111,17 @@ async function main() {
   const img = shot.content.find((c) => c.type === "image");
   check("computer screenshot returns image content block", !!img && img.data === "aWNvbg==" && img.mimeType === "image/png");
 
+  const saved = await client.callTool({ name: "computer", arguments: { action: "screenshot", save_to_disk: true } });
+  const savedText = saved.content.find((c) => c.type === "text").text;
+  const savedPath = savedText.match(/Saved to: (.+)/)?.[1];
+  const { readFile } = await import("node:fs/promises");
+  let savedOk = false;
+  if (savedPath) {
+    const buf = await readFile(savedPath);
+    savedOk = buf.toString("base64") === "aWNvbg==";
+  }
+  check("computer screenshot save_to_disk writes file and returns path", savedOk, `text: ${savedText}`);
+
   const nav = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other" } });
   check("navigate returns final url/title", !nav.isError && nav.content.at(-1).text.includes("Other"));
 

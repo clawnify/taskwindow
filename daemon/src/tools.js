@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
@@ -100,6 +103,12 @@ const rawDefs = [
       dy: z.number().int().optional().describe("Vertical scroll delta in pixels (positive scrolls down)"),
       ms: z.number().int().min(0).max(10_000).optional().describe('Milliseconds for the "wait" action (max 10000)'),
       fullPage: z.boolean().optional().describe('For "screenshot": capture the whole scrollable page instead of the viewport'),
+      save_to_disk: z
+        .boolean()
+        .optional()
+        .describe(
+          'For "screenshot": also write the PNG to a local file and return its path in the result, so it can be read, attached or handed to other tools. Default false.'
+        ),
     },
     timeoutMs: 30_000,
   },
@@ -326,7 +335,19 @@ export function registerTools(server, { bridge, version, logger = console }) {
           });
         }
         if (def.name === "browser_batch") return await runBatch(args, bridge, logger);
-        const result = await bridge.sendTool(def.name, args, def.timeoutMs);
+        // save_to_disk is a daemon-side concern: the extension has no disk
+        // access, so it is stripped here and applied to the returned image.
+        const { save_to_disk, ...forwardedArgs } = args;
+        const result = await bridge.sendTool(def.name, forwardedArgs, def.timeoutMs);
+        if (save_to_disk && result?.image) {
+          try {
+            const savedPath = await saveImageToDisk(result.image);
+            result.text = `${result.text || "image"}\nSaved to: ${savedPath}`;
+          } catch (err) {
+            logger.error(`[mcp] save_to_disk failed:`, err.message);
+            result.text = `${result.text || "image"}\nError saving to disk: ${err.message}`;
+          }
+        }
         return toMcpResult(result);
       } catch (err) {
         logger.error(`[mcp] ${def.name} failed:`, err.message);
@@ -334,6 +355,19 @@ export function registerTools(server, { bridge, version, logger = console }) {
       }
     });
   }
+}
+
+/**
+ * Write an image result to the session temp dir (OS-cleaned, like Claude's
+ * chrome extension does). Timestamped naming so repeat shots never overwrite.
+ */
+async function saveImageToDisk(image) {
+  const dir = path.join(os.tmpdir(), "taskwindow-screenshots");
+  await mkdir(dir, { recursive: true });
+  const ext = image.mimeType === "image/jpeg" ? "jpg" : "png";
+  const filePath = path.join(dir, `taskwindow-${Date.now()}-${process.pid}.${ext}`);
+  await writeFile(filePath, Buffer.from(image.data, "base64"));
+  return filePath;
 }
 
 async function runBatch({ steps, sessionToken }, bridge, logger) {
