@@ -1,10 +1,15 @@
 import { resolveTab } from "./tabs.js";
 
-export async function javascriptExecute({ code, awaitPromise = true, world = "MAIN", tabId, sessionToken }) {
+// MAIN world only: execution is `eval(src)` below, and in an ISOLATED world that
+// runs under the extension's own CSP, which MV3 forbids from allowing
+// unsafe-eval — it fails on every page, not just strict ones. Running arbitrary
+// source in an isolated world would need Page.createIsolatedWorld +
+// Runtime.evaluate over CDP instead.
+export async function javascriptExecute({ code, awaitPromise = true, tabId, sessionToken }) {
   const tab = await resolveTab(tabId, sessionToken);
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    world: world === "ISOLATED" ? "ISOLATED" : "MAIN",
+    world: "MAIN",
     injectImmediately: true,
     func: async (src, waitFor) => {
       const jsonify = (v) => {
