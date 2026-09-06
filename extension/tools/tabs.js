@@ -33,6 +33,28 @@ function serialized(fn) {
   return run;
 }
 
+/**
+ * Chrome's tab and tab-group calls can stall for tens of seconds right after
+ * the machine wakes. Every tool passes through the serialized store queue, so
+ * one stalled call there would hold every session's tools; bound them and say
+ * what stalled instead. Timeouts are marked so callers never mistake one for
+ * "the group is gone" and prune or recreate it.
+ */
+const CHROME_CALL_TIMEOUT_MS = 10_000;
+function bounded(promise, what) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(
+        `Chrome did not answer ${what} within ${CHROME_CALL_TIMEOUT_MS / 1000}s — it may still be waking up; retry in a moment`
+      );
+      err.chromeTimeout = true;
+      reject(err);
+    }, CHROME_CALL_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function policyAllowsAll() {
   const stored = await chrome.storage.local.get(ALLOW_ALL_KEY);
   return stored[ALLOW_ALL_KEY] === true;
@@ -160,9 +182,10 @@ async function allowedGroupIds(sessionToken) {
     const ids = [];
     for (const [name, entry] of Object.entries(session)) {
       try {
-        await chrome.tabGroups.get(entry.groupId);
+        await bounded(chrome.tabGroups.get(entry.groupId), "tabGroups.get");
         ids.push(entry.groupId);
-      } catch {
+      } catch (err) {
+        if (err?.chromeTimeout) throw err;
         delete session[name];
       }
     }
@@ -271,20 +294,21 @@ async function ensureTaskGroup(tabId, taskName, sessionToken) {
     let groupId = session[key]?.groupId;
     if (groupId != null) {
       try {
-        await chrome.tabGroups.get(groupId);
-        await chrome.tabs.group({ tabIds: [tabId], groupId });
-        await chrome.tabGroups.update(groupId, { color: "blue" });
+        await bounded(chrome.tabGroups.get(groupId), "tabGroups.get");
+        await bounded(chrome.tabs.group({ tabIds: [tabId], groupId }), "tabs.group");
+        await bounded(chrome.tabGroups.update(groupId, { color: "blue" }), "tabGroups.update");
         session[key] = { groupId, lastUsed: Date.now() };
         all[token] = session;
         await saveAgentGroups(all);
         await writeCurrentTask(token, key);
         return { groupId, task };
-      } catch {
+      } catch (err) {
+        if (err?.chromeTimeout) throw err;
         groupId = null; // group was closed; recreate below
       }
     }
-    groupId = await chrome.tabs.group({ tabIds: [tabId] });
-    await chrome.tabGroups.update(groupId, { title: task, color: "blue" });
+    groupId = await bounded(chrome.tabs.group({ tabIds: [tabId] }), "tabs.group");
+    await bounded(chrome.tabGroups.update(groupId, { title: task, color: "blue" }), "tabGroups.update");
     session[key] = { groupId, lastUsed: Date.now() };
     all[token] = session;
     await saveAgentGroups(all);
@@ -519,9 +543,58 @@ async function agentWindowId() {
   return null;
 }
 
+/**
+ * A tabs_create whose result never made it back (the daemon gave up waiting
+ * while Chrome was slow to wake) still opened its tab — and the agent, having
+ * no result, calls again. Without a token a retry and a second agent look the
+ * same, so the daemon mints the session token on the first call and names it
+ * in the timeout error: the retry with the same token, task and url is then
+ * provably the same caller and gets the tab the first call opened — whether
+ * that call is still in flight or finished within the last minute — instead
+ * of a second tab in a second group. The token is the capability: without one
+ * the key is unique per call and nothing is coalesced.
+ */
+const createsInFlight = new Map(); // key -> Promise<result>
+const createsDone = new Map(); // key -> { result, at }
+const RETRY_WINDOW_MS = 60_000;
+
+function replayed(result) {
+  return {
+    ...result,
+    data: { ...result.data, replayed: true },
+    text:
+      `${result.text}\nnote: an identical tabs_create from this session already opened this tab within the last minute ` +
+      "(its result may not have reached you) — no second tab was opened",
+  };
+}
+
 export async function tabsCreate({ url, active = true, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   const taskUsed = normalizeTask(task); // required, non-empty
+  const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
+
+  const inFlight = createsInFlight.get(key);
+  if (inFlight) return replayed(await inFlight);
+  const done = createsDone.get(key);
+  if (done && Date.now() - done.at < RETRY_WINDOW_MS && (await chrome.tabs.get(done.result.data.id).then(() => true, () => false))) {
+    return replayed(done.result);
+  }
+  createsDone.delete(key);
+
+  const run = openInTaskGroup({ url, active, taskUsed, token });
+  createsInFlight.set(key, run);
+  try {
+    const result = await run;
+    for (const [k, v] of createsDone) if (Date.now() - v.at >= RETRY_WINDOW_MS) createsDone.delete(k);
+    createsDone.set(key, { result, at: Date.now() });
+    return result;
+  } finally {
+    createsInFlight.delete(key);
+  }
+}
+
+async function openInTaskGroup({ url, active, taskUsed, token }) {
+  const startedAt = Date.now();
   const separateWindow = await policySeparateWindow();
   const all = await agentGroups();
   const existingGroupId = all[token]?.[taskUsed.toLowerCase()]?.groupId;
@@ -568,8 +641,19 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   } else {
     tab = await chrome.tabs.create({ url, active });
   }
+  const createdAt = Date.now();
 
-  const { groupId, task: taskName } = await ensureTaskGroup(tab.id, taskUsed, token);
+  // A tab is only ever the agent's inside a task group: outside one it is
+  // reachable by no session and shows in no popover list. If grouping fails
+  // (or stalls, see bounded), close the tab again rather than strand it.
+  let groupId, taskName;
+  try {
+    ({ groupId, task: taskName } = await ensureTaskGroup(tab.id, taskUsed, token));
+  } catch (err) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    throw new Error(`could not put the new tab in the "${taskUsed}" group (${err.message}); closed it again — retry`);
+  }
+  const timing = { createMs: createdAt - startedAt, groupMs: Date.now() - createdAt };
 
   // Agents open the same page again when they've lost track of the tab they
   // already have, and nothing told them. Don't dedupe silently (two tabs of one
@@ -590,6 +674,7 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
       sessionToken: token,
       newWindow: createdNewWindow,
       alreadyOpenIn: duplicates,
+      timing,
     },
     text:
       `opened tab ${tab.id} in the "${taskName}" group${createdNewWindow ? " in a new window" : ""}: ${tab.url || url}` +

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -341,7 +342,18 @@ export function registerTools(server, { bridge, version, updates = null, logger 
         // save_to_disk is a daemon-side concern: the extension has no disk
         // access, so it is stripped here and applied to the returned image.
         const { save_to_disk, ...forwardedArgs } = args;
-        const result = await bridge.sendTool(def.name, forwardedArgs, def.timeoutMs);
+        // A first tabs_create has no token yet; mint it here rather than in the
+        // extension so a call that times out on the way back can still name
+        // it. The retry with that token (same task and url) then gets the tab
+        // the first call opened, not a second tab in a second group.
+        if (def.name === "tabs_create" && !forwardedArgs.sessionToken) forwardedArgs.sessionToken = randomUUID();
+        let result;
+        try {
+          result = await bridge.sendTool(def.name, forwardedArgs, def.timeoutMs);
+        } catch (err) {
+          if (err.code !== "TIMEOUT") throw err;
+          throw new Error(`${err.message}. ${timeoutAdvice(def.name, forwardedArgs)}`);
+        }
         if (save_to_disk && result?.image) {
           try {
             const savedPath = await saveImageToDisk(result.image);
@@ -366,6 +378,21 @@ export function registerTools(server, { bridge, version, updates = null, logger 
       }
     });
   }
+}
+
+/**
+ * What to do after the extension missed a tool's deadline. Chrome is slow to
+ * wake, not dead: the call usually completes seconds later (the daemon logs
+ * it), so a blind repeat doubles whatever it did.
+ */
+function timeoutAdvice(tool, args) {
+  if (tool === "tabs_create") {
+    return (
+      `The tab may still be opening. Retry this exact call with sessionToken "${args.sessionToken}" ` +
+      "(same task and url): it returns the tab the first call opened instead of opening another."
+    );
+  }
+  return "Chrome may still complete the action; check the page (screenshot or read_page) before repeating anything that has side effects.";
 }
 
 /**

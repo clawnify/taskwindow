@@ -14,6 +14,11 @@ export async function javascriptExecute({ code, awaitPromise = true, tabId, sess
       awaitPromise: awaitPromise !== false,
       returnByValue: true,
       userGesture: true,
+      // REPL mode, as the DevTools console runs: a top-level `const ta = …`
+      // from one call otherwise stays declared in the page for good, so the
+      // next call reusing the name throws "Identifier 'ta' has already been
+      // declared". It also allows top-level `await`.
+      replMode: true,
     });
     if (exceptionDetails) {
       const detail = exceptionDetails.exception?.description || exceptionDetails.text || "Uncaught exception";

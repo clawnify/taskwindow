@@ -138,6 +138,8 @@ async function main() {
   check("tabs_create appends the update notice once, as its own text block",
     !created.isError && created.content.length === 2 && /9\.9\.9 is available/.test(created.content[1].text) && /Ask the user for permission/.test(created.content[1].text));
   check("other tools stay quiet about updates", !tabs.content.some((c) => /is available/.test(c.text || "")));
+  check("a first tabs_create reaches the extension with a daemon-minted sessionToken",
+    /sessionToken [0-9a-f-]{36}/.test(created.content[0].text), `text: ${created.content[0].text}`);
 
   const noTask = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/" } });
   check("tabs_create without task is rejected", noTask.isError === true && /task/i.test(noTask.content?.[0]?.text || ""));

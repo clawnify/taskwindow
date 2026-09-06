@@ -76,7 +76,12 @@ function onMessage(raw) {
     return;
   }
   if (msg.tool === "tabs_create") {
-    reply(true, { data: { id: 3, title: "New Tab", url: msg.params?.url || "about:blank" } });
+    reply(true, {
+      result: {
+        data: { id: 3, title: "New Tab", url: msg.params?.url || "about:blank", sessionToken: msg.params?.sessionToken || null },
+        text: `opened tab 3 — sessionToken ${msg.params?.sessionToken || "(none)"}`,
+      },
+    });
     return;
   }
   const fn = canned[msg.tool];

@@ -26,6 +26,7 @@ function makeChrome() {
   let nextWindowId = 2; // window 1 is the user's
   const windowFocus = []; // window ids handed {focused:true}
   const windowsCreated = []; // opts passed to windows.create
+  const gates = {}; // gates.group: awaited (may stall or throw) before tabs.group does its work
 
   function createTab({ url, active = true, windowId = 1 }) {
     const id = nextTabId++;
@@ -40,6 +41,7 @@ function makeChrome() {
     tabs,
     windowFocus,
     windowsCreated,
+    gates,
     chrome: {
       runtime: { getURL: (path) => `chrome-extension://test/${path}` },
       storage: {
@@ -97,6 +99,7 @@ function makeChrome() {
           );
         },
         async group({ tabIds, groupId }) {
+          if (gates.group) await gates.group();
           let gid = groupId;
           if (gid == null) {
             gid = nextGroupId++;
@@ -235,6 +238,89 @@ test("opening a URL the group already has is allowed but called out", async () =
   const c = await tabsCreate({ url: "https://app.example/contacts", task: "CRM", sessionToken: a.data.sessionToken });
   assert.deepEqual(c.data.alreadyOpenIn, []);
   assert.doesNotMatch(c.text, /already had/);
+});
+
+// The daemon mints the session token on a first tabs_create and hands it back
+// with a timeout error, so a retry carries the token even when the first
+// result never arrived. The retry must then get the first call's tab.
+test("an identical retry while the first tabs_create is still grouping gets that tab, not a second one", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  let release;
+  mock.gates.group = () => new Promise((r) => (release = r));
+  const call = { url: "https://a.example", task: "Research competitors", sessionToken: "tok-1" };
+
+  const first = tabsCreate(call);
+  await new Promise((r) => setTimeout(r, 20)); // first is now stalled inside tabs.group
+  const retry = tabsCreate(call);
+  await new Promise((r) => setTimeout(r, 20));
+  release();
+  const [r1, r2] = await Promise.all([first, retry]);
+
+  assert.equal(r2.data.id, r1.data.id);
+  assert.equal(r2.data.groupId, r1.data.groupId);
+  assert.equal(r2.data.replayed, true);
+  assert.match(r2.text, /no second tab was opened/);
+  assert.equal(mock.tabs.size, 1, "exactly one tab exists");
+  assert.equal(mock.groups.size, 1, "exactly one group exists");
+});
+
+test("an identical retry within a minute of a finished tabs_create gets that tab; other callers and other URLs do not", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, tabsClose } = await loadTabs(mock);
+  const call = { url: "https://a.example", task: "Research competitors", sessionToken: "tok-1" };
+  const r1 = await tabsCreate(call);
+  const r2 = await tabsCreate(call);
+  assert.equal(r2.data.id, r1.data.id, "same token, task and url within the window: the same tab");
+  assert.equal(r2.data.replayed, true);
+
+  const other = await tabsCreate({ ...call, sessionToken: "tok-2" }); // another agent, same task and url
+  assert.notEqual(other.data.id, r1.data.id, "a different token is a different caller: its own tab and group");
+  assert.notEqual(other.data.groupId, r1.data.groupId);
+  const page2 = await tabsCreate({ ...call, url: "https://a.example/2" });
+  assert.notEqual(page2.data.id, r1.data.id, "a different url is a different request");
+  assert.equal(page2.data.replayed, undefined);
+
+  await tabsClose({ tabId: r1.data.id, sessionToken: "tok-1" });
+  const again = await tabsCreate(call);
+  assert.notEqual(again.data.id, r1.data.id, "once the tab is gone the same call opens a new one");
+  assert.equal(again.data.replayed, undefined);
+});
+
+test("a tab that cannot be grouped is closed again, never left outside a task group", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  mock.gates.group = () => {
+    throw new Error("boom");
+  };
+  await assert.rejects(
+    () => tabsCreate({ url: "https://a.example", task: "Research competitors" }),
+    /could not put the new tab in the "Research competitors" group \(boom\); closed it again/
+  );
+  assert.equal(mock.tabs.size, 0, "no ungrouped tab is left behind");
+
+  delete mock.gates.group;
+  const ok = await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  assert.equal(mock.tabs.get(ok.data.id).groupId, ok.data.groupId, "the retry works and is grouped");
+});
+
+test("a Chrome call that stalls fails the tool (and closes the tab) instead of holding every session's tools", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const mock = makeChrome();
+  const { tabsCreate, tabsList } = await loadTabs(mock);
+  const other = await tabsCreate({ url: "https://b.example", task: "Fix bug" }); // another agent, before the stall
+  mock.gates.group = () => new Promise(() => {}); // never resolves
+
+  const stalled = tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  stalled.catch(() => {}); // rejection is asserted below; don't let it look unhandled meanwhile
+  await new Promise((r) => setImmediate(r)); // let it reach tabs.group
+  t.mock.timers.tick(10_001);
+  await assert.rejects(stalled, /Chrome did not answer tabs\.group within 10s/);
+  assert.equal(mock.tabs.size, 1, "only the other agent's tab remains");
+
+  // The store queue moved on: the other session's tools still work.
+  const list = await tabsList({ sessionToken: other.data.sessionToken });
+  assert.deepEqual(list.data.map((x) => x.id), [other.data.id]);
 });
 
 test("opening a tab never takes focus from the user's window", async () => {

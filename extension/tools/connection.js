@@ -96,9 +96,26 @@ async function connect() {
   ws = socket; // the active socket; handlers below close over their own `socket`
 
   // Application-level ping: the pong delivered to onMessage resets the MV3
-  // service-worker idle timer, which transport-level pings don't.
+  // service-worker idle timer, which transport-level pings don't. It doubles
+  // as the liveness check: a ping still unanswered when the next one is due
+  // means the daemon's end is gone (a laptop sleep can leave the socket
+  // half-open, reading OPEN here forever). Drop it and dial a fresh one.
+  let pingSentAt = 0;
   const keepalive = setInterval(() => {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "ping" }));
+    if (socket.readyState !== WebSocket.OPEN) return;
+    if (pingSentAt) {
+      clearInterval(keepalive);
+      if (ws === socket) ws = null; // onclose below is then a no-op; connect() owns the state
+      try { socket.close(); } catch {}
+      if (connected) {
+        connected = false;
+        broadcastStatus();
+      }
+      connect();
+      return;
+    }
+    pingSentAt = Date.now();
+    socket.send(JSON.stringify({ type: "ping" }));
   }, 20_000);
 
   socket.onopen = () => {
@@ -123,12 +140,14 @@ async function connect() {
     } catch {
       return;
     }
+    if (msg.type === "pong") pingSentAt = 0;
     if (msg.type === "tool_call") handleToolCall(msg);
   };
 
   socket.onclose = () => {
     clearInterval(keepalive);
-    if (ws === socket) ws = null;
+    if (ws !== socket) return; // superseded: the live socket owns the connection state
+    ws = null;
     if (connected) {
       connected = false;
       broadcastStatus();
