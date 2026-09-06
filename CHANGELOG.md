@@ -3,6 +3,43 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.5
+
+Daemon and extension. Coming from 0.2.4: `taskwindow update` — it refreshes the
+extension files, restarts the daemon and reloads the extension for you.
+
+### Fixed
+
+**A slow wake-up no longer turns one task into five groups and stray tabs.**
+After a laptop sleep, Chrome can take tens of seconds to answer the extension.
+The daemon gave up on `tabs_create` after 15s, the extension finished the call
+anyway, and each retry — having no session token yet — minted a new session:
+the popover filled with identical "linkedin batch 7 research" groups, some tabs
+sat outside any group, and the agent could reach none of them. Now the daemon
+mints the session token up front and names it in the timeout error, so the
+retry (same token, task and url) receives the tab the first call opened — still
+opening, or finished within the last minute — instead of a second one. A tab
+the extension cannot put in its task group is closed again, never stranded.
+Chrome calls that stall inside the tab-group bookkeeping fail that one call
+after 10s instead of holding every session's tools; the error says which call.
+
+**`taskwindow_status` and the popover agree about the connection.** Both ends
+now use the extension's 20-second ping as a liveness check: a socket the other
+side silently abandoned (typical after sleep) is dropped and redialled, so
+tools fail fast with "not connected" instead of timing out one by one while
+status still reported a connected extension.
+
+**`javascript_execute` can reuse variable names.** Top-level `const`/`let`
+declarations stayed in the page between calls, so the second script that
+declared `ta` failed with "Identifier 'ta' has already been declared". It now
+evaluates in the DevTools console's REPL mode, which also allows top-level
+`await`.
+
+**The daemon log names slow and late answers.** A tool call the extension
+answered after more than 5s — or after its deadline had passed — is logged
+with the elapsed time and, for `tabs_create`, how long the tab creation and
+the grouping each took, so the next slow morning is diagnosable.
+
 ## 0.2.4
 
 Extension-side. Coming from 0.2.3 or older: `npm install -g taskwindow@latest`,

@@ -10,14 +10,27 @@ const PROTOCOL_VERSION = 1;
  * tool calls go out as {type:"tool_call", id, tool, params} and come back as
  * {type:"tool_result", id, ok, ...}. Token is checked at handshake time.
  */
+const SLOW_ANSWER_MS = 5_000; // log tool calls the extension took longer than this
+const EXPIRED_TTL_MS = 10 * 60_000; // how long a timed-out call is remembered, to name a late answer
+
 export class Bridge {
-  constructor({ token, logger = console }) {
+  /**
+   * `pingIntervalMs` / `silenceMs`: the extension sends an application-level
+   * ping every 20s, so 65s without any message from it means its end of the
+   * socket is dead (a laptop sleep can leave it half-open, readyState still
+   * OPEN) — tests shrink both.
+   */
+  constructor({ token, logger = console, pingIntervalMs = 25_000, silenceMs = 65_000 }) {
     this.token = token;
     this.logger = logger;
     this.ext = null; // active extension WebSocket
-    this.pending = new Map(); // tool_call id -> {resolve, reject, timer}
+    this.pending = new Map(); // tool_call id -> {resolve, reject, timer, tool, sentAt}
+    this.expired = new Map(); // tool_call id -> {tool, sentAt, timeoutMs}: timed out, answer may still come
     this.lastHello = null;
+    this.lastExtMessage = 0;
     this.wss = null;
+    this.pingIntervalMs = pingIntervalMs;
+    this.silenceMs = silenceMs;
   }
 
   start(httpServer) {
@@ -39,6 +52,7 @@ export class Bridge {
         } catch {}
       }
       this.ext = ws;
+      this.lastExtMessage = Date.now();
 
       ws.on("message", (raw) => this.#onMessage(ws, raw));
       ws.on("close", () => {
@@ -52,13 +66,25 @@ export class Bridge {
       ws.on("error", () => {});
     });
 
-    // Ping to keep the MV3 service worker alive and detect dead peers.
+    // Ping to keep the MV3 service worker alive, and drop a socket whose
+    // extension has gone silent: otherwise `connected` stays true, every tool
+    // call waits out its full timeout, and status reports a healthy extension
+    // while the popover says "not connected".
     this.pingTimer = setInterval(() => {
       if (this.ext && this.ext.readyState === 0 /* CONNECTING */) return;
+      if (this.ext && this.ext.readyState === 1 && Date.now() - this.lastExtMessage > this.silenceMs) {
+        this.logger.log(
+          `[bridge] extension silent for ${Math.round((Date.now() - this.lastExtMessage) / 1000)}s — dropping the stale connection`
+        );
+        try {
+          this.ext.terminate();
+        } catch {}
+        return;
+      }
       for (const client of this.wss.clients) {
         if (client.readyState === 1 /* OPEN */) client.ping();
       }
-    }, 25_000);
+    }, this.pingIntervalMs);
   }
 
   stop() {
@@ -85,12 +111,17 @@ export class Bridge {
       );
     }
     const id = randomUUID();
+    const sentAt = Date.now();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`TaskWindow extension did not answer "${tool}" within ${Math.round(timeoutMs / 1000)}s`));
+        for (const [k, v] of this.expired) if (Date.now() - v.sentAt > EXPIRED_TTL_MS) this.expired.delete(k);
+        this.expired.set(id, { tool, sentAt, timeoutMs });
+        const err = new Error(`TaskWindow extension did not answer "${tool}" within ${Math.round(timeoutMs / 1000)}s`);
+        err.code = "TIMEOUT";
+        reject(err);
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, tool });
+      this.pending.set(id, { resolve, reject, timer, tool, sentAt });
       this.ext.send(JSON.stringify({ type: "tool_call", id, tool, params }));
     });
   }
@@ -102,6 +133,7 @@ export class Bridge {
     } catch {
       return;
     }
+    if (ws === this.ext) this.lastExtMessage = Date.now();
     switch (msg.type) {
       case "hello":
         this.lastHello = msg;
@@ -114,9 +146,26 @@ export class Bridge {
         break;
       case "tool_result": {
         const entry = this.pending.get(msg.id);
-        if (!entry) return;
+        if (!entry) {
+          // The extension did the work; nobody is waiting any more. Say so —
+          // "did not answer" alone reads as a dead extension, and the tab or
+          // click this answer describes really happened.
+          const late = this.expired.get(msg.id);
+          if (late) {
+            this.expired.delete(msg.id);
+            this.logger.log(
+              `[bridge] ${late.tool} answered ${((Date.now() - late.sentAt) / 1000).toFixed(1)}s after it was sent — ` +
+                `past its ${Math.round(late.timeoutMs / 1000)}s timeout, so the caller already got an error${this.#timing(msg)}`
+            );
+          }
+          return;
+        }
         clearTimeout(entry.timer);
         this.pending.delete(msg.id);
+        const elapsed = Date.now() - entry.sentAt;
+        if (elapsed > SLOW_ANSWER_MS) {
+          this.logger.log(`[bridge] ${entry.tool} answered after ${(elapsed / 1000).toFixed(1)}s${this.#timing(msg)}`);
+        }
         if (msg.ok) entry.resolve(msg.result ?? {});
         else entry.reject(new Error(msg.error || `extension tool "${entry.tool}" failed`));
         break;
@@ -124,6 +173,14 @@ export class Bridge {
       default:
         break;
     }
+  }
+
+  /** Per-phase timing a handler reported (tabs_create does), for the slow/late log lines. */
+  #timing(msg) {
+    const timing = msg.result?.data?.timing;
+    if (!timing || typeof timing !== "object") return "";
+    const parts = Object.entries(timing).map(([k, v]) => `${k.replace(/Ms$/, "")} ${(v / 1000).toFixed(1)}s`);
+    return parts.length ? ` (${parts.join(", ")})` : "";
   }
 
   #failAllPending(err) {
