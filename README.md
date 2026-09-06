@@ -77,8 +77,9 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
 ## How the isolation works
 
 - **Task groups & sessions**: every tab the agent creates goes into a blue tab
-  group named after its task (`tabs_create` requires the task name — it says
-  what the group is about). Sessions are isolated from each other:
+  group named after its task (the first `tabs_create` names it — it says what
+  the group is about; later tabs join the session's current group unless a new
+  task name starts another). Sessions are isolated from each other:
   `tabs_create` returns a secret sessionToken and every browser tool call is
   scoped to that session's groups, so concurrent agents never share tabs —
   even when they pick the same task name. By default the agent can only see

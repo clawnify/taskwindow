@@ -604,9 +604,28 @@ function replayed(result) {
   };
 }
 
+/**
+ * The task group a session is working in, by display title. The current-task
+ * map stores the lowercased key, so the title comes from the group itself.
+ */
+async function rememberedTask(token) {
+  const current = await currentTaskName(token);
+  const entry = current ? (await agentGroups())[token]?.[current] : null;
+  if (!entry) {
+    throw new Error(
+      'This session has no task group yet, so "task" is required: pass a name describing what the tab group is about (e.g. "Research competitors"). ' +
+        "Later tabs_create calls can omit it to join that group."
+    );
+  }
+  const title = await chrome.tabGroups.get(entry.groupId).then((g) => g?.title, () => null);
+  return normalizeTask(title || current);
+}
+
 export async function tabsCreate({ url, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
-  const taskUsed = normalizeTask(task); // required, non-empty
+  // The task is remembered per session like the token, so the agent names it
+  // once: a later call without one joins the session's current task group.
+  const taskUsed = String(task ?? "").trim() ? normalizeTask(task) : await rememberedTask(token);
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
 
   const inFlight = createsInFlight.get(key);

@@ -39,16 +39,20 @@ const rawDefs = [
     name: "tabs_create",
     description:
       "Open a new tab in a task-named tab group (in the agent's own window). The tab opens in the background: it never becomes " +
-      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Requires a \"task\" name saying what the group is about; " +
-      "same task name in the same session reuses that group. Returns a sessionToken — pass it as \"sessionToken\" in every subsequent " +
-      "browser tool call; concurrent agents' sessions never share tabs. Don't open a second tab for a page you already have: " +
+      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Your first call needs a \"task\" name saying what " +
+      "the group is about and returns a sessionToken — pass it as \"sessionToken\" in every subsequent browser tool call; concurrent " +
+      "agents' sessions never share tabs. Later calls with the token need no task: the tab joins your session's current task group. " +
+      "Pass a new task name to start another group. Don't open a second tab for a page you already have: " +
       "use reload or navigate on the existing tab (see tabs_list).",
     inputSchema: {
       url: z.string().url().describe("URL to open (include the scheme, e.g. https://...)"),
       task: z
         .string()
         .min(1)
-        .describe('Task name for the tab group — required; says what the group is about, e.g. "Research competitors".'),
+        .optional()
+        .describe(
+          'Task name for the tab group, e.g. "Research competitors". Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
+        ),
       sessionToken: z
         .string()
         .optional()

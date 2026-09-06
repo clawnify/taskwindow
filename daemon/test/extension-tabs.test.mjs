@@ -144,10 +144,31 @@ async function loadTabs(mock) {
   return import(url);
 }
 
-test("tabs_create requires a task name", async () => {
+test("tabs_create requires a task name until the session has a group", async () => {
   const { tabsCreate } = await loadTabs(makeChrome());
-  await assert.rejects(() => tabsCreate({ url: "https://example.com" }), /task/i);
-  await assert.rejects(() => tabsCreate({ url: "https://example.com", task: "   " }), /task/i);
+  await assert.rejects(() => tabsCreate({ url: "https://example.com" }), /"task" is required/);
+  await assert.rejects(() => tabsCreate({ url: "https://example.com", task: "   " }), /"task" is required/);
+  // A token the daemon minted for a call that never got as far as a group.
+  await assert.rejects(() => tabsCreate({ url: "https://example.com", sessionToken: "fresh" }), /no task group yet, so "task" is required/);
+});
+
+test("with a session, the task is remembered: omit it to join the current group, name a new one to switch", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  const first = await tabsCreate({ url: "https://a.example", task: "Research Competitors" });
+  const token = first.data.sessionToken;
+
+  const joined = await tabsCreate({ url: "https://a.example/2", sessionToken: token });
+  assert.equal(joined.data.groupId, first.data.groupId, "no task given: joins the current task group");
+  assert.equal(joined.data.task, "Research Competitors", "the group's own title, not a lowercased key");
+
+  const switched = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: token });
+  assert.notEqual(switched.data.groupId, first.data.groupId, "a new name starts another group");
+  const after = await tabsCreate({ url: "https://b.example/2", sessionToken: token });
+  assert.equal(after.data.groupId, switched.data.groupId, "…and it is now the current one");
+
+  const back = await tabsCreate({ url: "https://a.example/3", task: "research competitors", sessionToken: token });
+  assert.equal(back.data.groupId, first.data.groupId, "naming an earlier task returns to that group");
 });
 
 test("two agents with the same task name get separate groups and tokens", async () => {
