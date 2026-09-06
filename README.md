@@ -84,6 +84,16 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
   even when they pick the same task name. By default the agent can only see
   and act on tabs in its own groups — never yours. You can click a group in
   the toolbar popover to watch, and widen access in settings.
+- **Your focus is never taken**: nothing the agent does brings a tab or window
+  forward on you. Chrome's `tabs.create` makes a new tab active by default and
+  `windows.create` focuses the new window by default; TaskWindow always opens
+  tabs in the background (a background tab still renders, so screenshots and
+  page reads work), creates the agent window unfocused, and hands focus back if
+  Chrome raises a window anyway. Mouse input is the one thing that needs a
+  visible tab, and the agent brings a tab forward for it only in a window you
+  are not looking at; if the tab is behind yours in your focused window, the
+  call fails instead of switching. Clicking a group in the popover is the only
+  thing that focuses the agent's window — and that is you asking for it.
 - **Pairing**: the daemon listens on 127.0.0.1 only. During setup, the CLI gives
   the extension a short-lived, single-use code; the long-lived bearer token is
   returned only after the code is claimed. Manual codes are available with

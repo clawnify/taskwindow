@@ -501,14 +501,50 @@ export async function tabsList({ sessionToken } = {}) {
  * Chrome sometimes raises a window as a side effect of tab creation, even for
  * background tabs. If focus moved and we didn't ask for it, hand it back.
  * Best effort: works between Chrome windows; can't restore focus to a
- * non-Chrome app the user was working in.
+ * non-Chrome app the user was working in. Only when Chrome is frontmost
+ * (`focused`): if the user is in another app, nothing visible moved, and
+ * focusing a Chrome window then would pull them out of that app.
  */
 async function restoreFocusIfStolen(previousWindowId) {
   if (previousWindowId == null) return;
   try {
-    const { id } = await chrome.windows.getLastFocused();
-    if (id !== previousWindowId) await chrome.windows.update(previousWindowId, { focused: true });
+    const { id, focused } = await chrome.windows.getLastFocused();
+    if (focused && id !== previousWindowId) await chrome.windows.update(previousWindowId, { focused: true });
   } catch {}
+}
+
+/**
+ * True while the user is looking at `windowId`: Chrome is the frontmost app
+ * and this is its focused window. Nothing the agent does may change what that
+ * window shows — switching its active tab pulls the user off whatever they
+ * were doing. With no `windowId`, asks about the current window (where
+ * `tabs.create` without a windowId lands). An unfocused window — Chrome in the
+ * background, or the agent's own window beside the user's — may change freely.
+ */
+export async function userIsWatching(windowId) {
+  try {
+    const win = await chrome.windows.getLastFocused();
+    return !!win?.focused && (windowId == null || win.id === windowId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Make `tab` the one its window shows, so CDP input reaches it (an inactive
+ * tab's widget is hidden and the event ack stalls) — unless the user is
+ * looking at that window. TaskWindow never switches tabs on the user, so the
+ * call fails with the reason instead.
+ */
+export async function activateForInput(tab) {
+  if (tab.active) return;
+  if (await userIsWatching(tab.windowId)) {
+    throw new Error(
+      `tab ${tab.id} is behind another tab in the window the user is working in right now, and TaskWindow never switches tabs on the user` +
+      ` — retry once they have moved on, or ask them to bring it forward (Settings → "Open agent tabs in their own window" keeps agent tabs out of their window)`,
+    );
+  }
+  await chrome.tabs.update(tab.id, { active: true });
 }
 
 /**
@@ -568,7 +604,7 @@ function replayed(result) {
   };
 }
 
-export async function tabsCreate({ url, active = true, task, sessionToken } = {}) {
+export async function tabsCreate({ url, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   const taskUsed = normalizeTask(task); // required, non-empty
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
@@ -581,7 +617,7 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   }
   createsDone.delete(key);
 
-  const run = openInTaskGroup({ url, active, taskUsed, token });
+  const run = openInTaskGroup({ url, taskUsed, token });
   createsInFlight.set(key, run);
   try {
     const result = await run;
@@ -593,12 +629,16 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   }
 }
 
-async function openInTaskGroup({ url, active, taskUsed, token }) {
+async function openInTaskGroup({ url, taskUsed, token }) {
   const startedAt = Date.now();
   const separateWindow = await policySeparateWindow();
   const all = await agentGroups();
   const existingGroupId = all[token]?.[taskUsed.toLowerCase()]?.groupId;
 
+  // Always a background tab: `tabs.create` defaults to active, which would
+  // switch what the window shows. A background tab still renders, so
+  // screenshots and page reads work; input brings it forward later, and only
+  // in a window nobody is looking at (see activateForInput).
   let tab;
   let createdNewWindow = false;
   const previouslyFocused = (await chrome.windows.getLastFocused().catch(() => null))?.id ?? null;
@@ -616,7 +656,7 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
     }
     if (windowId == null) windowId = await agentWindowId();
     if (windowId != null) {
-      tab = await chrome.tabs.create({ url, active, windowId });
+      tab = await chrome.tabs.create({ url, active: false, windowId });
     } else {
       // First use: a fresh agent window, anchored by a pinned tab outside any
       // group. Chrome drops a window with its last tab, and one task finishing
@@ -630,16 +670,15 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
       const anchor = win.tabs?.[0];
       if (!anchor) throw new Error("window was created but Chrome returned no tab");
       await chrome.tabs.update(anchor.id, { pinned: true });
-      tab = await chrome.tabs.create({ url, active, windowId: win.id });
+      tab = await chrome.tabs.create({ url, active: false, windowId: win.id });
       createdNewWindow = true;
     }
-    // `active` means active *within the agent window*, so the page renders and
-    // screenshots work — never that the agent window takes focus. The user is
-    // in their own window or another app entirely; Chrome sometimes raises a
-    // window on tab creation regardless, so hand focus straight back.
+    // The agent window never takes focus. The user is in their own window or
+    // another app entirely; Chrome sometimes raises a window on tab creation
+    // regardless, so hand focus straight back.
     await restoreFocusIfStolen(previouslyFocused);
   } else {
-    tab = await chrome.tabs.create({ url, active });
+    tab = await chrome.tabs.create({ url, active: false });
   }
   const createdAt = Date.now();
 
@@ -668,7 +707,6 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
       id: tab.id,
       title: tab.title,
       url: tab.url || url,
-      active: !!active,
       groupId,
       task: taskName,
       sessionToken: token,

@@ -38,7 +38,8 @@ const rawDefs = [
   {
     name: "tabs_create",
     description:
-      "Open a new tab in a task-named tab group (in the agent's own window). Requires a \"task\" name saying what the group is about; " +
+      "Open a new tab in a task-named tab group (in the agent's own window). The tab opens in the background: it never becomes " +
+      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Requires a \"task\" name saying what the group is about; " +
       "same task name in the same session reuses that group. Returns a sessionToken — pass it as \"sessionToken\" in every subsequent " +
       "browser tool call; concurrent agents' sessions never share tabs. Don't open a second tab for a page you already have: " +
       "use reload or navigate on the existing tab (see tabs_list).",
@@ -48,7 +49,6 @@ const rawDefs = [
         .string()
         .min(1)
         .describe('Task name for the tab group — required; says what the group is about, e.g. "Research competitors".'),
-      active: z.boolean().optional().describe("Make it the active tab of the agent window (default true). Never focuses that window: the user's window and app keep focus."),
       sessionToken: z
         .string()
         .optional()

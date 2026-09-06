@@ -1,4 +1,4 @@
-import { resolveTab } from "./tabs.js";
+import { resolveTab, activateForInput } from "./tabs.js";
 import { indicator } from "./page.js";
 import { withDebugger, send } from "./cdp.js";
 
@@ -129,9 +129,10 @@ export async function computer(params) {
   // inactive tab's widget is hidden, so the event ack stalls for seconds and a
   // wheel event never returns. With several tasks (and agents) sharing one
   // window that is the normal case, so activate first. This changes which tab
-  // the agent window shows — never which window has focus.
-  if (!tab.active && action !== "type" && action !== "key") {
-    await chrome.tabs.update(tab.id, { active: true });
+  // the agent window shows — never which window has focus, and never a tab in
+  // the window the user is looking at (the call fails instead).
+  if (action !== "type" && action !== "key") {
+    await activateForInput(tab);
   }
 
   return withDebugger(tab.id, async (tabId) => {
