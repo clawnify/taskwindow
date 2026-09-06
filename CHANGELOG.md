@@ -9,16 +9,18 @@ Extension and daemon. Coming from 0.2.5: nothing to run — `taskwindow update`.
 
 ### Fixed
 
-**The agent never switches tabs on you.** Clicking or scrolling in a tab that
-was not the visible one first made it visible — and when that window was the
-one you were working in (agent groups adopted into it, or "own window" off),
-you were pulled off your page mid-task; the same happened when a tab was
-opened as the active one there. Now a tab is only brought forward, or opened
-active, in a window you are not looking at: the agent's own window, or any
-window while Chrome is in the background. If the tab is behind yours in your
-focused window, the input call fails with the reason instead of switching. The
-focus hand-back after Chrome raises a window on tab creation now runs only
-while Chrome is frontmost, so it can no longer pull you out of another app.
+**The agent never switches tabs on you.** `tabs_create` opened every tab as
+the active one, and clicking or scrolling in a tab that was not the visible
+one first made it visible — so when that window was the one you were working
+in (agent groups adopted into it, or "own window" off), you were pulled off
+your page mid-task. Now every tab opens in the background: the `active` option
+is gone, and a background tab still renders, so screenshots and page reads
+work as before. Input brings a tab forward only in a window you are not
+looking at — the agent's own window, or any window while Chrome is in the
+background; if the tab is behind yours in your focused window, the call fails
+with the reason instead of switching. The focus hand-back after Chrome raises
+a window on tab creation now runs only while Chrome is frontmost, so it can no
+longer pull you out of another app.
 
 ## 0.2.5
 

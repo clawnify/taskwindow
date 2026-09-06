@@ -530,11 +530,6 @@ export async function userIsWatching(windowId) {
   }
 }
 
-/** `active` as requested, unless that would switch the tab the user is looking at. */
-async function activeUnlessWatched(active, windowId) {
-  return !!active && !(await userIsWatching(windowId));
-}
-
 /**
  * Make `tab` the one its window shows, so CDP input reaches it (an inactive
  * tab's widget is hidden and the event ack stalls) — unless the user is
@@ -609,7 +604,7 @@ function replayed(result) {
   };
 }
 
-export async function tabsCreate({ url, active = true, task, sessionToken } = {}) {
+export async function tabsCreate({ url, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   const taskUsed = normalizeTask(task); // required, non-empty
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
@@ -622,7 +617,7 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   }
   createsDone.delete(key);
 
-  const run = openInTaskGroup({ url, active, taskUsed, token });
+  const run = openInTaskGroup({ url, taskUsed, token });
   createsInFlight.set(key, run);
   try {
     const result = await run;
@@ -634,14 +629,17 @@ export async function tabsCreate({ url, active = true, task, sessionToken } = {}
   }
 }
 
-async function openInTaskGroup({ url, active, taskUsed, token }) {
+async function openInTaskGroup({ url, taskUsed, token }) {
   const startedAt = Date.now();
   const separateWindow = await policySeparateWindow();
   const all = await agentGroups();
   const existingGroupId = all[token]?.[taskUsed.toLowerCase()]?.groupId;
 
+  // Always a background tab: `tabs.create` defaults to active, which would
+  // switch what the window shows. A background tab still renders, so
+  // screenshots and page reads work; input brings it forward later, and only
+  // in a window nobody is looking at (see activateForInput).
   let tab;
-  let activate = !!active;
   let createdNewWindow = false;
   const previouslyFocused = (await chrome.windows.getLastFocused().catch(() => null))?.id ?? null;
 
@@ -658,9 +656,7 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
     }
     if (windowId == null) windowId = await agentWindowId();
     if (windowId != null) {
-      // The agent window may be the one the user adopted and is working in.
-      activate = await activeUnlessWatched(active, windowId);
-      tab = await chrome.tabs.create({ url, active: activate, windowId });
+      tab = await chrome.tabs.create({ url, active: false, windowId });
     } else {
       // First use: a fresh agent window, anchored by a pinned tab outside any
       // group. Chrome drops a window with its last tab, and one task finishing
@@ -674,18 +670,15 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
       const anchor = win.tabs?.[0];
       if (!anchor) throw new Error("window was created but Chrome returned no tab");
       await chrome.tabs.update(anchor.id, { pinned: true });
-      tab = await chrome.tabs.create({ url, active: activate, windowId: win.id });
+      tab = await chrome.tabs.create({ url, active: false, windowId: win.id });
       createdNewWindow = true;
     }
-    // `active` means active *within the agent window*, so the page renders and
-    // screenshots work — never that the agent window takes focus. The user is
-    // in their own window or another app entirely; Chrome sometimes raises a
-    // window on tab creation regardless, so hand focus straight back.
+    // The agent window never takes focus. The user is in their own window or
+    // another app entirely; Chrome sometimes raises a window on tab creation
+    // regardless, so hand focus straight back.
     await restoreFocusIfStolen(previouslyFocused);
   } else {
-    // Shares the user's current window: never as its active tab while they're in it.
-    activate = await activeUnlessWatched(active);
-    tab = await chrome.tabs.create({ url, active: activate });
+    tab = await chrome.tabs.create({ url, active: false });
   }
   const createdAt = Date.now();
 
@@ -714,7 +707,6 @@ async function openInTaskGroup({ url, active, taskUsed, token }) {
       id: tab.id,
       title: tab.title,
       url: tab.url || url,
-      active: activate,
       groupId,
       task: taskName,
       sessionToken: token,
