@@ -513,39 +513,6 @@ async function restoreFocusIfStolen(previousWindowId) {
   } catch {}
 }
 
-/**
- * True while the user is looking at `windowId`: Chrome is the frontmost app
- * and this is its focused window. Nothing the agent does may change what that
- * window shows — switching its active tab pulls the user off whatever they
- * were doing. With no `windowId`, asks about the current window (where
- * `tabs.create` without a windowId lands). An unfocused window — Chrome in the
- * background, or the agent's own window beside the user's — may change freely.
- */
-export async function userIsWatching(windowId) {
-  try {
-    const win = await chrome.windows.getLastFocused();
-    return !!win?.focused && (windowId == null || win.id === windowId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Make `tab` the one its window shows, so CDP input reaches it (an inactive
- * tab's widget is hidden and the event ack stalls) — unless the user is
- * looking at that window. TaskWindow never switches tabs on the user, so the
- * call fails with the reason instead.
- */
-export async function activateForInput(tab) {
-  if (tab.active) return;
-  if (await userIsWatching(tab.windowId)) {
-    throw new Error(
-      `tab ${tab.id} is behind another tab in the window the user is working in right now, and TaskWindow never switches tabs on the user` +
-      ` — retry once they have moved on, or ask them to bring it forward (Settings → "Open agent tabs in their own window" keeps agent tabs out of their window)`,
-    );
-  }
-  await chrome.tabs.update(tab.id, { active: true });
-}
 
 /**
  * The window already hosting the agent's work, or null if there is none.
@@ -655,9 +622,8 @@ async function openInTaskGroup({ url, taskUsed, token }) {
   const existingGroupId = all[token]?.[taskUsed.toLowerCase()]?.groupId;
 
   // Always a background tab: `tabs.create` defaults to active, which would
-  // switch what the window shows. A background tab still renders, so
-  // screenshots and page reads work; input brings it forward later, and only
-  // in a window nobody is looking at (see activateForInput).
+  // switch what the window shows. A background tab still renders and takes
+  // input, so nothing ever needs to bring it forward.
   let tab;
   let createdNewWindow = false;
   const previouslyFocused = (await chrome.windows.getLastFocused().catch(() => null))?.id ?? null;

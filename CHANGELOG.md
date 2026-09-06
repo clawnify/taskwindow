@@ -3,6 +3,20 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.7
+
+Extension only. Coming from 0.2.6: `taskwindow update`.
+
+### Fixed
+
+**Nothing ever brings a tab forward.** 0.2.6 still made a tab visible before
+mouse input, on the belief that a hidden tab never acknowledges the event, and
+failed the call when that tab was behind yours — which agents then worked
+around by closing tabs or clicking through page scripts. Checked in Chrome:
+click, wheel scroll and typing over the DevTools protocol all land in a tab
+that is not its window's active tab, and it stays that way. The activation and
+the "behind another tab" error are gone.
+
 ## 0.2.6
 
 Extension and daemon. Coming from 0.2.5: nothing to run — `taskwindow update`.

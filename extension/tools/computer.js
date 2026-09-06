@@ -1,4 +1,4 @@
-import { resolveTab, activateForInput } from "./tabs.js";
+import { resolveTab } from "./tabs.js";
 import { indicator } from "./page.js";
 import { withDebugger, send } from "./cdp.js";
 
@@ -125,16 +125,9 @@ export async function computer(params) {
     return { text: `waited ${ms}ms` };
   }
 
-  // CDP mouse input only reaches the tab that is active in its window: an
-  // inactive tab's widget is hidden, so the event ack stalls for seconds and a
-  // wheel event never returns. With several tasks (and agents) sharing one
-  // window that is the normal case, so activate first. This changes which tab
-  // the agent window shows — never which window has focus, and never a tab in
-  // the window the user is looking at (the call fails instead).
-  if (action !== "type" && action !== "key") {
-    await activateForInput(tab);
-  }
-
+  // Input goes to the tab as it is, hidden or not: CDP delivers mouse, wheel
+  // and key events to a background tab (verified in Chrome, see README), so
+  // nothing here ever changes which tab a window shows.
   return withDebugger(tab.id, async (tabId) => {
     switch (action) {
       case "left_click":
