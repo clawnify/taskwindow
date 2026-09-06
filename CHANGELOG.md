@@ -3,6 +3,23 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.6
+
+Extension and daemon. Coming from 0.2.5: nothing to run — `taskwindow update`.
+
+### Fixed
+
+**The agent never switches tabs on you.** Clicking or scrolling in a tab that
+was not the visible one first made it visible — and when that window was the
+one you were working in (agent groups adopted into it, or "own window" off),
+you were pulled off your page mid-task; the same happened when a tab was
+opened as the active one there. Now a tab is only brought forward, or opened
+active, in a window you are not looking at: the agent's own window, or any
+window while Chrome is in the background. If the tab is behind yours in your
+focused window, the input call fails with the reason instead of switching. The
+focus hand-back after Chrome raises a window on tab creation now runs only
+while Chrome is frontmost, so it can no longer pull you out of another app.
+
 ## 0.2.5
 
 Daemon and extension. Coming from 0.2.4: `taskwindow update` — it refreshes the

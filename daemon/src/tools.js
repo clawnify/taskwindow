@@ -48,7 +48,7 @@ const rawDefs = [
         .string()
         .min(1)
         .describe('Task name for the tab group — required; says what the group is about, e.g. "Research competitors".'),
-      active: z.boolean().optional().describe("Make it the active tab of the agent window (default true). Never focuses that window: the user's window and app keep focus."),
+      active: z.boolean().optional().describe("Make it the active tab of the agent window (default true). Never focuses that window, and never switches tabs in a window the user is looking at: the user's window, tab and app stay as they are."),
       sessionToken: z
         .string()
         .optional()

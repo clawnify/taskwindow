@@ -26,7 +26,9 @@ function makeChrome() {
   let nextWindowId = 2; // window 1 is the user's
   const windowFocus = []; // window ids handed {focused:true}
   const windowsCreated = []; // opts passed to windows.create
+  const userFocus = { id: 1, focused: true }; // what windows.getLastFocused answers: the user is in window 1, Chrome frontmost
   const gates = {}; // gates.group: awaited (may stall or throw) before tabs.group does its work
+  const flags = { raiseOnCreate: false }; // Chrome marks a newly created window as last-focused
 
   function createTab({ url, active = true, windowId = 1 }) {
     const id = nextTabId++;
@@ -41,7 +43,9 @@ function makeChrome() {
     tabs,
     windowFocus,
     windowsCreated,
+    userFocus,
     gates,
+    flags,
     chrome: {
       runtime: { getURL: (path) => `chrome-extension://test/${path}` },
       storage: {
@@ -115,7 +119,7 @@ function makeChrome() {
       },
       windows: {
         async getLastFocused() {
-          return { id: 1 };
+          return { ...userFocus };
         },
         async update(id, props) {
           if (props?.focused) windowFocus.push(id);
@@ -123,6 +127,7 @@ function makeChrome() {
         async create(opts) {
           windowsCreated.push(opts);
           const id = nextWindowId++;
+          if (flags.raiseOnCreate) userFocus.id = id;
           const created = opts?.url ? [createTab({ url: opts.url, active: true, windowId: id })] : [];
           return { id, tabs: created };
         },
@@ -335,6 +340,72 @@ test("opening a tab never takes focus from the user's window", async () => {
   // Focus may only ever be handed *back* to the user's window (id 1), never given to an agent window.
   assert.ok(mock.windowFocus.every((id) => id === 1), `focused agent window(s): ${mock.windowFocus}`);
   assert.equal(mock.tabs.get(a.data.id).active, true, "active still means active within the agent window");
+});
+
+test("a tab in the window the user is looking at is never opened as its active tab", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  // Shared-window mode: the tab lands in the user's window (1), which is focused.
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", active: true });
+  assert.equal(mock.tabs.get(a.data.id).active, false, "opened in the background behind the user's tab");
+  assert.equal(a.data.active, false, "the result reports the tab as it actually is");
+
+  // Chrome in the background (no focused window): the user isn't looking, so active is honoured.
+  mock.userFocus.focused = false;
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: a.data.sessionToken, active: true });
+  assert.equal(mock.tabs.get(b.data.id).active, true);
+  assert.equal(b.data.active, true);
+});
+
+test("the adopted agent window is the user's: no active tab there while they're in it", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", active: true }); // agent window 2, unfocused
+  assert.equal(mock.tabs.get(a.data.id).active, true);
+
+  mock.userFocus.id = 2; // the user switched into the agent window
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: a.data.sessionToken, active: true });
+  assert.equal(mock.tabs.get(b.data.id).active, false, "the user is looking at this window");
+  assert.equal(mock.windowFocus.length, 0, "and no window was focused");
+});
+
+test("input never switches tabs in the window the user is looking at", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, activateForInput } = await loadTabs(mock);
+  mock.userFocus.focused = false;
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", active: true });
+  const tab = mock.tabs.get(a.data.id);
+  tab.active = false; // the user came back to this window and picked another tab
+
+  mock.userFocus.focused = true;
+  await assert.rejects(() => activateForInput(tab), /never switches tabs on the user/);
+  assert.equal(tab.active, false, "still behind the user's tab");
+
+  mock.userFocus.focused = false; // the user left for another app
+  await activateForInput(tab);
+  assert.equal(tab.active, true, "safe to bring forward in a window nobody is looking at");
+  assert.equal(mock.windowFocus.length, 0, "still no window focus");
+});
+
+test("focus stolen by Chrome is handed back only while Chrome is frontmost", async () => {
+  // Chrome raised the new window over the user's Chrome window: hand focus back to theirs.
+  let mock = makeChrome();
+  let { tabsCreate } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  mock.flags.raiseOnCreate = true;
+  await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  assert.deepEqual(mock.windowFocus, [1]);
+
+  // The user is in another app (no Chrome window focused): Chrome only re-marked its
+  // last-focused window. Focusing anything now would pull the user out of that app.
+  mock = makeChrome();
+  ({ tabsCreate } = await loadTabs(mock));
+  mock.storage.set("separateWindow", true);
+  mock.flags.raiseOnCreate = true;
+  mock.userFocus.focused = false;
+  await tabsCreate({ url: "https://a.example", task: "Research competitors" });
+  assert.deepEqual(mock.windowFocus, []);
 });
 
 test("tabs_list without a sessionToken gives an instructive error; with one, only own tabs", async () => {
