@@ -5,6 +5,8 @@ write these for users. Add the version's section before tagging.
 
 ## 0.2.6
 
+Extension and daemon. Coming from 0.2.5: nothing to run — `taskwindow update`.
+
 ### Changed
 
 **The task name is remembered per session.** Only the first `tabs_create`
@@ -13,6 +15,21 @@ joins the session's current task group — the same way the token is kept for
 the agent instead of re-derived. A new task name still starts another group
 and makes it current. A token whose session has no group yet gets an error
 that says to pass the name.
+
+### Fixed
+
+**The agent never switches tabs on you.** `tabs_create` opened every tab as
+the active one, and clicking or scrolling in a tab that was not the visible
+one first made it visible — so when that window was the one you were working
+in (agent groups adopted into it, or "own window" off), you were pulled off
+your page mid-task. Now every tab opens in the background: the `active` option
+is gone, and a background tab still renders, so screenshots and page reads
+work as before. Input brings a tab forward only in a window you are not
+looking at — the agent's own window, or any window while Chrome is in the
+background; if the tab is behind yours in your focused window, the call fails
+with the reason instead of switching. The focus hand-back after Chrome raises
+a window on tab creation now runs only while Chrome is frontmost, so it can no
+longer pull you out of another app.
 
 ## 0.2.5
 

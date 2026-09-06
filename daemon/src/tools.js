@@ -38,7 +38,8 @@ const rawDefs = [
   {
     name: "tabs_create",
     description:
-      "Open a new tab in a task-named tab group (in the agent's own window). Your first call needs a \"task\" name saying what " +
+      "Open a new tab in a task-named tab group (in the agent's own window). The tab opens in the background: it never becomes " +
+      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Your first call needs a \"task\" name saying what " +
       "the group is about and returns a sessionToken — pass it as \"sessionToken\" in every subsequent browser tool call; concurrent " +
       "agents' sessions never share tabs. Later calls with the token need no task: the tab joins your session's current task group. " +
       "Pass a new task name to start another group. Don't open a second tab for a page you already have: " +
@@ -52,7 +53,6 @@ const rawDefs = [
         .describe(
           'Task name for the tab group, e.g. "Research competitors". Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
         ),
-      active: z.boolean().optional().describe("Make it the active tab of the agent window (default true). Never focuses that window: the user's window and app keep focus."),
       sessionToken: z
         .string()
         .optional()
