@@ -89,11 +89,12 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
   `windows.create` focuses the new window by default; TaskWindow always opens
   tabs in the background (a background tab still renders, so screenshots and
   page reads work), creates the agent window unfocused, and hands focus back if
-  Chrome raises a window anyway. Mouse input is the one thing that needs a
-  visible tab, and the agent brings a tab forward for it only in a window you
-  are not looking at; if the tab is behind yours in your focused window, the
-  call fails instead of switching. Clicking a group in the popover is the only
-  thing that focuses the agent's window — and that is you asking for it.
+  Chrome raises a window anyway. A background tab also takes mouse, wheel and
+  keyboard input over the DevTools protocol (checked in Chrome: click, scroll
+  and type all land in a tab that is not its window's active tab, and it stays
+  that way), so nothing ever brings a tab forward. Clicking a group in the
+  popover is the only thing that focuses the agent's window — and that is you
+  asking for it.
 - **Pairing**: the daemon listens on 127.0.0.1 only. During setup, the CLI gives
   the extension a short-lived, single-use code; the long-lived bearer token is
   returned only after the code is claimed. Manual codes are available with

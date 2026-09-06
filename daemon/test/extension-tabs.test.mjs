@@ -366,22 +366,6 @@ test("a tab is never opened as the active tab, whatever window it lands in", asy
   assert.equal(mock.windowFocus.length, 0, "and no window was focused");
 });
 
-test("input never switches tabs in the window the user is looking at", async () => {
-  const mock = makeChrome();
-  const { tabsCreate, activateForInput } = await loadTabs(mock);
-  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" });
-  const tab = mock.tabs.get(a.data.id);
-  assert.equal(tab.active, false);
-
-  await assert.rejects(() => activateForInput(tab), /never switches tabs on the user/);
-  assert.equal(tab.active, false, "still behind the user's tab");
-
-  mock.userFocus.focused = false; // the user left for another app
-  await activateForInput(tab);
-  assert.equal(tab.active, true, "safe to bring forward in a window nobody is looking at");
-  assert.equal(mock.windowFocus.length, 0, "still no window focus");
-});
-
 test("focus stolen by Chrome is handed back only while Chrome is frontmost", async () => {
   // Chrome raised the new window over the user's Chrome window: hand focus back to theirs.
   let mock = makeChrome();

@@ -15,12 +15,10 @@ one first made it visible — so when that window was the one you were working
 in (agent groups adopted into it, or "own window" off), you were pulled off
 your page mid-task. Now every tab opens in the background: the `active` option
 is gone, and a background tab still renders, so screenshots and page reads
-work as before. Input brings a tab forward only in a window you are not
-looking at — the agent's own window, or any window while Chrome is in the
-background; if the tab is behind yours in your focused window, the call fails
-with the reason instead of switching. The focus hand-back after Chrome raises
-a window on tab creation now runs only while Chrome is frontmost, so it can no
-longer pull you out of another app.
+work as before — and so does input: a background tab takes clicks, scrolls
+and keys over the DevTools protocol, so nothing ever brings a tab forward. The
+focus hand-back after Chrome raises a window on tab creation now runs only
+while Chrome is frontmost, so it can no longer pull you out of another app.
 
 ## 0.2.5
 
