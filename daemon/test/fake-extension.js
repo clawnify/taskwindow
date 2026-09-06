@@ -76,6 +76,11 @@ function onMessage(raw) {
     return;
   }
   if (msg.tool === "tabs_create") {
+    if (!msg.params?.task) {
+      // The real extension remembers the session's task; the fake has no session state, so it behaves like a fresh one.
+      reply(false, { error: 'This session has no task group yet, so "task" is required' });
+      return;
+    }
     reply(true, {
       result: {
         data: { id: 3, title: "New Tab", url: msg.params?.url || "about:blank", sessionToken: msg.params?.sessionToken || null },

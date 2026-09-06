@@ -3,6 +3,17 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.6
+
+### Changed
+
+**The task name is remembered per session.** Only the first `tabs_create`
+needs a `task`; later calls with the sessionToken can omit it and the tab
+joins the session's current task group — the same way the token is kept for
+the agent instead of re-derived. A new task name still starts another group
+and makes it current. A token whose session has no group yet gets an error
+that says to pass the name.
+
 ## 0.2.5
 
 Daemon and extension. Coming from 0.2.4: `taskwindow update` — it refreshes the

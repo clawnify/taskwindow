@@ -104,7 +104,8 @@ async function main() {
   const computer = tools.find((t) => t.name === "computer");
   check("computer schema has action enum", JSON.stringify(computer.inputSchema).includes("screenshot"));
   const tabsCreate = tools.find((t) => t.name === "tabs_create");
-  check("tabs_create schema requires task", Array.isArray(tabsCreate.inputSchema.required) && tabsCreate.inputSchema.required.includes("task"));
+  check("tabs_create schema requires url but not task (the session remembers its task)",
+    Array.isArray(tabsCreate.inputSchema.required) && tabsCreate.inputSchema.required.includes("url") && !tabsCreate.inputSchema.required.includes("task"));
 
   console.log("tools/call through the extension bridge:");
   const status = await client.callTool({ name: "taskwindow_status", arguments: {} });
@@ -142,7 +143,8 @@ async function main() {
     /sessionToken [0-9a-f-]{36}/.test(created.content[0].text), `text: ${created.content[0].text}`);
 
   const noTask = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/" } });
-  check("tabs_create without task is rejected", noTask.isError === true && /task/i.test(noTask.content?.[0]?.text || ""));
+  check("tabs_create without task on a fresh session is rejected by the extension, not the schema",
+    noTask.isError === true && /"task" is required/.test(noTask.content?.[0]?.text || ""), `text: ${noTask.content?.[0]?.text}`);
 
   console.log("browser_batch:");
   const batch = await client.callTool({
