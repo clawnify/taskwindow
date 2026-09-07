@@ -51,7 +51,7 @@ const rawDefs = [
         .min(1)
         .optional()
         .describe(
-          'Task name for the tab group, e.g. "Research competitors". Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
+          'Task name for the tab group — one word if possible, two at most (e.g. "Research" or "Research competitors"). Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
         ),
       sessionToken: z
         .string()
