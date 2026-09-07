@@ -2,7 +2,8 @@
  * Tab access policy.
  *
  * Every tab the agent creates lands in a tab group named after the task it
- * belongs to (e.g. "Research competitors") — the task name is required and is
+ * belongs to (e.g. "Research", or "Research competitors" at most — one word
+ * if possible, two at most) — the task name is required and is
  * the human-readable label of the group. Groups are scoped per agent
  * SESSION: tabs_create mints (or takes) a secret sessionToken and namespaces
  * that session's groups under it, so concurrent agents never share tabs even
@@ -72,6 +73,9 @@ function normalizeToken(sessionToken) {
     : null;
 }
 
+// Formats an already-chosen task name (fresh or recalled from a stored group
+// title) without re-judging its word count — recalling an existing group
+// must never fail just because it predates the word-count rule below.
 function normalizeTask(name) {
   const trimmed = String(name || "")
     .replace(/\s+/g, " ")
@@ -79,10 +83,23 @@ function normalizeTask(name) {
     .slice(0, 60);
   if (!trimmed) {
     throw new Error(
-      'A task name is required: pass "task" describing what the tab group is about (e.g. "Research competitors").'
+      'A task name is required: pass "task" describing what the tab group is about — one word if possible, two at most (e.g. "Research" or "Research competitors").'
     );
   }
   return trimmed;
+}
+
+// Enforced only where the caller is naming a NEW task group, not when
+// recalling one that already exists (ensureTaskGroup, rememberedTask).
+function requireShortTask(name) {
+  const task = normalizeTask(name);
+  const wordCount = task.split(" ").length;
+  if (wordCount > 2) {
+    throw new Error(
+      `Task name "${task}" has ${wordCount} words — use one word if possible, two at most (e.g. "Research" or "Research competitors").`
+    );
+  }
+  return task;
 }
 
 function isGroupEntry(v) {
@@ -580,7 +597,7 @@ async function rememberedTask(token) {
   const entry = current ? (await agentGroups())[token]?.[current] : null;
   if (!entry) {
     throw new Error(
-      'This session has no task group yet, so "task" is required: pass a name describing what the tab group is about (e.g. "Research competitors"). ' +
+      'This session has no task group yet, so "task" is required: pass a name describing what the tab group is about — one word if possible, two at most (e.g. "Research" or "Research competitors"). ' +
         "Later tabs_create calls can omit it to join that group."
     );
   }
@@ -592,7 +609,7 @@ export async function tabsCreate({ url, task, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   // The task is remembered per session like the token, so the agent names it
   // once: a later call without one joins the session's current task group.
-  const taskUsed = String(task ?? "").trim() ? normalizeTask(task) : await rememberedTask(token);
+  const taskUsed = String(task ?? "").trim() ? requireShortTask(task) : await rememberedTask(token);
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
 
   const inFlight = createsInFlight.get(key);
