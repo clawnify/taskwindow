@@ -5,7 +5,19 @@ write these for users. Add the version's section before tagging.
 
 ## 0.2.7
 
-Extension only. Coming from 0.2.6: `taskwindow update`.
+Extension and daemon. Coming from 0.2.6: `taskwindow update`.
+
+### Added
+
+**Short tasks clean up after themselves.** Naming a task in `tabs_create` now
+also asks `longRunning`: might this task need more than an hour? Say `false`
+and the group closes itself, tabs and all, once it has been idle for an hour,
+so a finished lookup no longer sits in the TaskWindow window for a month. Say
+`true` and it keeps the 30-day lifetime. The answer is required whenever a
+`task` is named; later calls that join the current group need none, and
+passing it then revises the current group's answer (a task that turned out
+longer). A group whose tab you are reading is never closed, and groups created
+before this release keep the 30-day lifetime.
 
 ### Fixed
 

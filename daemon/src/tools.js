@@ -41,7 +41,8 @@ const rawDefs = [
       "Open a new tab in a task-named tab group (in the agent's own window). The tab opens in the background: it never becomes " +
       "the active tab and never takes focus, so the user's window, tab and app stay as they are. Your first call needs a \"task\" name saying what " +
       "the group is about and returns a sessionToken — pass it as \"sessionToken\" in every subsequent browser tool call; concurrent " +
-      "agents' sessions never share tabs. Later calls with the token need no task: the tab joins your session's current task group. " +
+      "agents' sessions never share tabs. Whenever you pass a task, also pass \"longRunning\": whether the task might need more than an hour; " +
+      "a group for a shorter task closes itself after an hour idle. Later calls with the token need no task: the tab joins your session's current task group. " +
       "Pass a new task name to start another group. Don't open a second tab for a page you already have: " +
       "use reload or navigate on the existing tab (see tabs_list).",
     inputSchema: {
@@ -52,6 +53,12 @@ const rawDefs = [
         .optional()
         .describe(
           'Task name for the tab group — one word if possible, two at most (e.g. "Research" or "Research competitors"). Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
+        ),
+      longRunning: z
+        .boolean()
+        .optional()
+        .describe(
+          "Might this task need more than an hour to complete? Required whenever you pass \"task\". false: the group closes itself (tabs and all) once idle for an hour. true: it stays until unused for 30 days. Pass it without a task to change the current group's answer."
         ),
       sessionToken: z
         .string()
