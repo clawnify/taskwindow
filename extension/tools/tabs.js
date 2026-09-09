@@ -250,14 +250,29 @@ function deniedError(tabId) {
   );
 }
 
+/**
+ * Record use of whichever session group holds `tab`, if any. Independent of
+ * the access policy: with allowAllTabs the agent may address a group tab
+ * without its token (or with one), and the reaper's idle clock must still
+ * see that use — a short task's group closes an hour after its last use.
+ */
+async function touchGroupOfTab(tab) {
+  if (tab.groupId == null || tab.groupId < 0) return;
+  const all = await agentGroups();
+  for (const [token, session] of Object.entries(all)) {
+    for (const [name, entry] of Object.entries(session)) {
+      if (entry.groupId === tab.groupId) return touchGroup(token, name);
+    }
+  }
+}
+
 async function assertAllowedTab(tab, sessionToken) {
+  await touchGroupOfTab(tab);
   if (await policyAllowsAll()) return;
   const token = normalizeToken(sessionToken);
   if (token == null) throw new Error(NEED_SESSION);
-  const { ids, map } = await allowedGroupIds(token);
+  const { ids } = await allowedGroupIds(token);
   if (!ids.includes(tab.groupId)) throw deniedError(tab.id);
-  const name = Object.entries(map).find(([, e]) => e.groupId === tab.groupId)?.[0];
-  if (name) await touchGroup(token, name);
 }
 
 export async function resolveTab(tabId, sessionToken) {
@@ -317,7 +332,7 @@ export async function resolveTab(tabId, sessionToken) {
  * session's current task. `longRunning` (boolean) sets the group's lifetime
  * (see groupTtlMs); when undefined the group keeps what it has.
  */
-async function ensureTaskGroup(tabId, taskName, sessionToken, longRunning) {
+async function ensureTaskGroup(tabId, taskName, sessionToken, longRunning, windowId) {
   const token = normalizeToken(sessionToken);
   if (token == null) throw new Error(NEED_SESSION);
   const task = normalizeTask(taskName);
@@ -348,9 +363,12 @@ async function ensureTaskGroup(tabId, taskName, sessionToken, longRunning) {
     // says otherwise — and for a service worker that is the last-focused
     // window, i.e. the user's — and Chrome moves the tab there to join it.
     // Pin the group to the window the tab is already in.
-    const { windowId } = await bounded(chrome.tabs.get(tabId), "tabs.get");
+    // Every caller has just created the tab and knows its window; ask Chrome
+    // only if one didn't say. This runs inside the store queue, which every
+    // session's tools share — one fewer call that can stall there after a wake.
+    const wid = windowId ?? (await bounded(chrome.tabs.get(tabId), "tabs.get")).windowId;
     groupId = await bounded(
-      chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId } }),
+      chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId: wid } }),
       "tabs.group"
     );
     await bounded(chrome.tabGroups.update(groupId, { title: task, color: "blue" }), "tabGroups.update");
@@ -415,7 +433,30 @@ export async function adoptWindow(windowId) {
     }
   }
   if (moved > 0) await saveAgentGroups(all);
+  await moveAnchorTo(windowId);
   return moved;
+}
+
+/**
+ * Put the anchor in `windowId`, so the window the user picked is the one new
+ * tasks open in. Moving it empties the old agent window, which Chrome then
+ * closes — the point of adopting. A stray anchor left over elsewhere (the user
+ * reopened a closed window) loses the tie in agentWindowId: the groups are here.
+ */
+async function moveAnchorTo(windowId) {
+  const anchored = await anchorTabs();
+  if (anchored.some((t) => t.windowId === windowId)) return;
+  const anchor = anchored[0];
+  if (anchor) {
+    await chrome.tabs.move(anchor.id, { windowId, index: -1 });
+  } else {
+    const tab = await chrome.tabs.create({ url: workspaceUrl(), windowId, active: false });
+    anchored.push(tab);
+    await chrome.tabs.update(tab.id, { pinned: true });
+    return;
+  }
+  // A cross-window move can drop the pin; the anchor is only an anchor pinned.
+  await chrome.tabs.update(anchor.id, { pinned: true });
 }
 
 /** Summary for the toolbar popover: agent task groups that still have tabs. */
@@ -564,13 +605,23 @@ async function restoreFocusIfStolen(previousWindowId) {
  * The window already hosting the agent's work, or null if there is none.
  *
  * A Chrome window holds many tab groups, so every task joins one shared agent
- * window rather than opening its own — concurrent agents included. Only groups
- * in our own registry are considered, so this never returns the user's window
- * unless they put an agent group there themselves (which is what adoptWindow
- * is for). Most-recently-used first, so a new task lands beside live work
- * rather than in the window of some long-idle group.
+ * window rather than opening its own — concurrent agents included.
+ *
+ * The pinned workspace anchor is what identifies that window. Where a group
+ * happens to sit is only an inference, and a bad one: anything that moves a
+ * group (Chrome moving a tab to join a group in another window, a drag, a
+ * window merge on restore) silently redefined which window was the agent's,
+ * and every later task followed it there — into the user's window. The anchor
+ * is a fact, and adoptWindow moves it when the user picks a window instead.
+ *
+ * Groups still speak when the anchor cannot: they break a tie between several
+ * anchored windows (the agent's is the one with live work, most recently used
+ * first) and stand in when no anchor is left at all.
  */
 async function agentWindowId() {
+  const anchored = await anchorTabs();
+  if (anchored.length === 1) return anchored[0].windowId;
+
   const all = await agentGroups();
   const entries = Object.values(all)
     .flatMap((session) => Object.values(session))
@@ -578,18 +629,29 @@ async function agentWindowId() {
   for (const { groupId } of entries) {
     try {
       const tabs = await chrome.tabs.query({ groupId });
-      if (tabs.length > 0) return tabs[0].windowId;
+      if (tabs.length === 0) continue;
+      const { windowId } = tabs[0];
+      // With no anchor anywhere, live work is the best evidence there is.
+      if (anchored.length === 0) return windowId;
+      if (anchored.some((t) => t.windowId === windowId)) return windowId;
     } catch {}
   }
-  // Every task may have finished, but the anchored window is still open. Not
-  // query({url}): match patterns only cover http(s)/file, so a chrome-extension
-  // URL there matches nothing. `pinned` is a plain filter; compare URLs ourselves.
+  return anchored[0]?.windowId ?? null;
+}
+
+/**
+ * The pinned workspace tabs, one per window that has ever anchored the agent.
+ * Not query({url}): match patterns only cover http(s)/file, so a
+ * chrome-extension URL there matches nothing. `pinned` is a plain filter;
+ * compare URLs ourselves.
+ */
+async function anchorTabs() {
   try {
     const pinned = await chrome.tabs.query({ pinned: true });
-    const anchor = pinned.find((t) => t.url === workspaceUrl());
-    if (anchor) return anchor.windowId;
-  } catch {}
-  return null;
+    return pinned.filter((t) => t.url === workspaceUrl());
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -762,7 +824,7 @@ async function openInTaskGroup({ url, taskUsed, token, longRunning }) {
   // (or stalls, see bounded), close the tab again rather than strand it.
   let groupId, taskName, isLongRunning;
   try {
-    ({ groupId, task: taskName, longRunning: isLongRunning } = await ensureTaskGroup(tab.id, taskUsed, token, longRunning));
+    ({ groupId, task: taskName, longRunning: isLongRunning } = await ensureTaskGroup(tab.id, taskUsed, token, longRunning, tab.windowId));
   } catch (err) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw new Error(`could not put the new tab in the "${taskUsed}" group (${err.message}); closed it again — retry`);
