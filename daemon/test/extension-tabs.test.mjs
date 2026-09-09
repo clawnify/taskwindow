@@ -30,6 +30,13 @@ function makeChrome() {
   const gates = {}; // gates.group: awaited (may stall or throw) before tabs.group does its work
   const flags = { raiseOnCreate: false }; // Chrome marks a newly created window as last-focused
 
+  // Chrome keeps no empty groups: the last tab leaving destroys the group.
+  function reapEmptyGroups() {
+    for (const gid of [...groups.keys()]) {
+      if (![...tabs.values()].some((t) => t.groupId === gid)) groups.delete(gid);
+    }
+  }
+
   function createTab({ url, active = true, windowId = 1 }) {
     const id = nextTabId++;
     const tab = { id, windowId, groupId: -1, url, title: "", active, pinned: false };
@@ -89,6 +96,15 @@ function makeChrome() {
         },
         async remove(ids) {
           for (const id of Array.isArray(ids) ? ids : [ids]) tabs.delete(id);
+          reapEmptyGroups();
+        },
+        // Chrome dissolves a tab's group membership when it moves to another
+        // window, and destroys a group once its last tab is gone.
+        async move(ids, { windowId }) {
+          for (const id of Array.isArray(ids) ? ids : [ids]) {
+            Object.assign(tabs.get(id), { windowId, groupId: -1 });
+          }
+          reapEmptyGroups();
         },
         async query(q) {
           const all = [...tabs.values()];
@@ -115,7 +131,8 @@ function makeChrome() {
             gid = nextGroupId++;
             groups.set(gid, { id: gid, title: "", color: "", windowId });
           } else {
-            windowId = groups.get(gid)?.windowId ?? userFocus.id;
+            if (!groups.has(gid)) throw new Error(`No group with id ${gid}`);
+            windowId = groups.get(gid).windowId;
           }
           for (const id of tabIds) Object.assign(tabs.get(id), { groupId: gid, windowId });
           return gid;
@@ -586,4 +603,45 @@ test("with allowAllTabs, addressing a group tab still counts as use, so a short 
   for (const session of Object.values(mock.storage.get("agentGroups")))
     for (const e of Object.values(session)) assert.ok(Date.now() - e.lastUsed < 60_000, "lastUsed was written");
   assert.ok(mock.tabs.has(a.data.id));
+});
+
+// The anchor, not the groups, says which window is the agent's — see the
+// agentWindowId comment. Both cases below were the bug's aftermath: its groups
+// sat in the user's window, which is exactly where the old lookup pointed.
+test("a new task returns to the anchored window, past groups left in the user's", async () => {
+  const mock = makeChrome();
+  // An anchored agent window (2) holding only its pinned workspace tab, and a
+  // task group parked in the user's window (1).
+  mock.groups.set(70, { id: 70, title: "Old task", color: "blue", windowId: 1 });
+  mock.tabs.set(9, { id: 9, windowId: 1, groupId: 70, url: "https://old.example", title: "", active: true, pinned: false });
+  mock.tabs.set(10, { id: 10, windowId: 2, groupId: -1, url: "chrome-extension://test/workspace/workspace.html", title: "", active: true, pinned: true });
+  mock.storage.set("agentGroups", { "tok-old": { "old task": { groupId: 70, lastUsed: Date.now() } } });
+
+  const { tabsCreate } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+
+  const a = await tabsCreate({ url: "https://new.example", task: "Fresh", longRunning: true });
+  assert.equal(mock.tabs.get(a.data.id).windowId, 2, "the anchored window, not the user's");
+  assert.equal(a.data.newWindow, false, "and no second agent window was opened");
+});
+
+test("adopting a window takes the anchor with it, so later tasks follow", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, adoptWindow } = await loadTabs(mock);
+  mock.storage.set("separateWindow", true);
+  const a = await tabsCreate({ url: "https://a.example", task: "Research", longRunning: true });
+  const agentWin = mock.tabs.get(a.data.id).windowId;
+  assert.notEqual(agentWin, 1);
+
+  assert.equal(await adoptWindow(1), 1, "one group moved into the user's window");
+  assert.equal(mock.tabs.get(a.data.id).windowId, 1, "the task's tab came along");
+  const anchors = [...mock.tabs.values()].filter((t) => t.url.endsWith("workspace/workspace.html"));
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0].windowId, 1, "the anchor marks the adopted window");
+  assert.equal(anchors[0].pinned, true, "and is still pinned after the move");
+  assert.equal([...mock.tabs.values()].filter((t) => t.windowId === agentWin).length, 0, "the old window is empty, so Chrome drops it");
+
+  const b = await tabsCreate({ url: "https://b.example", task: "Later", longRunning: true });
+  assert.equal(mock.tabs.get(b.data.id).windowId, 1, "a new task opens in the adopted window");
+  assert.equal(b.data.newWindow, false);
 });

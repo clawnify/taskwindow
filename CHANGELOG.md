@@ -28,6 +28,17 @@ naming a window puts it in Chrome's *current* window — for an extension servic
 worker, the window you last focused — and Chrome moves the tab there to join
 it. New groups now say which window they belong to.
 
+**And the agent window is found by its anchor, not by its groups.** The fix
+above governs new groups; it could not bring back the groups the bug had
+already parked in your window, because the lookup for "the agent's window"
+answered with wherever the most recent group happened to sit — your window,
+authoritatively. So a brand-new task kept opening there too. The pinned
+workspace tab now identifies the agent window; groups only break a tie between
+two anchored windows, or stand in when no anchor is left. "Use this window for
+the agent" moves the anchor along with the groups, which empties the old agent
+window and lets Chrome close it. Nothing to do after updating: the next task
+opens where the anchor is.
+
 **Nothing ever brings a tab forward.** 0.2.6 still made a tab visible before
 mouse input, on the belief that a hidden tab never acknowledges the event, and
 failed the call when that tab was behind yours — which agents then worked

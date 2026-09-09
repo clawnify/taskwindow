@@ -94,7 +94,7 @@ async function openFallbackWindow(url, v, taskName, token) {
   const win = await chrome.windows.create({ url, width: v.width, height: v.height + 130, focused: false });
   const ftab = win.tabs?.[0];
   if (!ftab) throw new Error("window was created but Chrome returned no tab");
-  await ensureTaskGroup(ftab.id, taskName, token);
+  await ensureTaskGroup(ftab.id, taskName, token, undefined, ftab.windowId);
   await ensureAttached(ftab.id);
   await send(ftab.id, "Emulation.setDeviceMetricsOverride", {
     width: v.width,
@@ -147,7 +147,7 @@ export async function setViewport({ viewports, url, tabId, sessionToken } = {}) 
     });
     const htab = win.tabs?.[0];
     if (!htab) throw new Error("window was created but Chrome returned no tab");
-    await ensureTaskGroup(htab.id, taskName, token);
+    await ensureTaskGroup(htab.id, taskName, token, undefined, htab.windowId);
     s = { windowId: win.id, tabId: htab.id, url: targetUrl, viewports: vps, fallbacks: [] };
     await chrome.storage.local.set({ [sessionKey(token)]: s });
   }
