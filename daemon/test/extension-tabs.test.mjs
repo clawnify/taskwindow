@@ -561,3 +561,29 @@ test("groups stored before the longRunning flag keep the 30-day lifetime", async
   assert.equal(await reapIdleGroups(), 0, "no flag means no short TTL");
   assert.ok(mock.tabs.has(a.data.id));
 });
+
+test("with allowAllTabs, addressing a group tab still counts as use, so a short task in progress is not reaped", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, resolveTab, reapIdleGroups } = await loadTabs(mock);
+  const a = await tabsCreate({ url: "https://a.example", task: "Quick check", longRunning: false });
+  mock.storage.set("allowAllTabs", true);
+  for (const t of mock.tabs.values()) t.active = false;
+  const backdate = () => {
+    for (const session of Object.values(mock.storage.get("agentGroups")))
+      for (const e of Object.values(session)) e.lastUsed = Date.now() - 50 * 60 * 1000;
+  };
+
+  backdate();
+  await resolveTab(a.data.id, a.data.sessionToken); // the agent is still working at minute 50
+  assert.equal(await reapIdleGroups(), 0, "use with the token refreshed the idle clock");
+
+  backdate();
+  await resolveTab(a.data.id, null); // allowAllTabs lets the agent address the tab without a token
+  assert.equal(await reapIdleGroups(), 0, "use without a token refreshed it too");
+
+  backdate();
+  await resolveTab(a.data.id, null);
+  for (const session of Object.values(mock.storage.get("agentGroups")))
+    for (const e of Object.values(session)) assert.ok(Date.now() - e.lastUsed < 60_000, "lastUsed was written");
+  assert.ok(mock.tabs.has(a.data.id));
+});
