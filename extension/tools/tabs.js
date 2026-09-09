@@ -335,7 +335,15 @@ async function ensureTaskGroup(tabId, taskName, sessionToken, longRunning) {
         groupId = null; // group was closed; recreate below
       }
     }
-    groupId = await bounded(chrome.tabs.group({ tabIds: [tabId] }), "tabs.group");
+    // A new group is born in Chrome's *current* window unless createProperties
+    // says otherwise — and for a service worker that is the last-focused
+    // window, i.e. the user's — and Chrome moves the tab there to join it.
+    // Pin the group to the window the tab is already in.
+    const { windowId } = await bounded(chrome.tabs.get(tabId), "tabs.get");
+    groupId = await bounded(
+      chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId } }),
+      "tabs.group"
+    );
     await bounded(chrome.tabGroups.update(groupId, { title: task, color: "blue" }), "tabGroups.update");
     session[key] = { groupId, lastUsed: Date.now(), ...lifetime(null) };
     all[token] = session;
@@ -389,7 +397,7 @@ export async function adoptWindow(windowId) {
         // Moving between windows can dissolve the group — re-form it here.
         await chrome.tabs.group({ tabIds, groupId: gid });
       } catch {
-        const fresh = await chrome.tabs.group({ tabIds });
+        const fresh = await chrome.tabs.group({ tabIds, createProperties: { windowId } });
         await chrome.tabGroups.update(fresh, { title: name, color: "blue" });
         session[name].groupId = fresh;
       }
