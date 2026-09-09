@@ -7,17 +7,37 @@ write these for users. Add the version's section before tagging.
 
 Extension and daemon. Coming from 0.2.6: `taskwindow update`.
 
+### Changed
+
+**One session, one tab group.** A tab group exists to hold every tab of one
+job, but agents were getting a group per tab: at the moment it calls
+`tabs_create` an agent has its attention on the sub-task in front of it, so it
+named *that* — "Glass bezel check", "Masked band check" — and each name made
+its own group of one. The name is now read once, on the first call of a
+session, and fixed: every later tab joins that group, and a `task` passed
+anyway is reported back in the result instead of starting a second group. The
+tool now asks for the name of the whole job, not of the page about to open.
+
+**Every result restates your session token.** The token was named once, in the
+first `tabs_create` result, at the start of a session meant to run for a whole
+job — so it was exactly the detail an agent loses as its context is
+compacted, and the next `tabs_create` without it counted as a different
+session and opened a second tab group. Every session-scoped result now ends
+with a `session: ...` line, so the token an agent needs is always in what it
+just read.
+
 ### Added
 
 **Short tasks clean up after themselves.** Naming a task in `tabs_create` now
-also asks `longRunning`: might this task need more than an hour? Say `false`
+also asks `longRunning`: might this job need more than an hour? Say `false`
 and the group closes itself, tabs and all, once it has been idle for an hour,
 so a finished lookup no longer sits in the TaskWindow window for a month. Say
-`true` and it keeps the 30-day lifetime. The answer is required whenever a
-`task` is named; later calls that join the current group need none, and
-passing it then revises the current group's answer (a task that turned out
-longer). A group whose tab you are reading is never closed, and groups created
-before this release keep the 30-day lifetime.
+`true` and it keeps the 30-day lifetime. The answer is required on the call
+that names the task — the first of a session. To revise it later, pass
+`longRunning` on its own; passed alongside a `task`, it is ignored with the
+name it came with, so a stray sub-task name can never cut a whole job's group
+down to the one-hour lifetime. A group whose tab you are reading is never
+closed, and groups created before this release keep the 30-day lifetime.
 
 ### Fixed
 

@@ -13,7 +13,7 @@ const sessionToken = z
   .string()
   .optional()
   .describe(
-    "Session token returned by tabs_create — pass it in every browser tool call so the call acts only on your session's tabs (sessions are isolated from each other)."
+    "Session token returned by tabs_create — pass it in every browser tool call so the call acts only on your session's tabs (sessions are isolated from each other). Every result restates it as a trailing \"session: ...\" line, so the latest one is always at hand."
   );
 
 // Result contract with the extension: {text?, image?: {data, mimeType}, data?}.
@@ -38,12 +38,12 @@ const rawDefs = [
   {
     name: "tabs_create",
     description:
-      "Open a new tab in a task-named tab group (in the agent's own window). The tab opens in the background: it never becomes " +
-      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Your first call needs a \"task\" name saying what " +
-      "the group is about and returns a sessionToken — pass it as \"sessionToken\" in every subsequent browser tool call; concurrent " +
-      "agents' sessions never share tabs. Whenever you pass a task, also pass \"longRunning\": whether the task might need more than an hour; " +
-      "a group for a shorter task closes itself after an hour idle. Later calls with the token need no task: the tab joins your session's current task group. " +
-      "Pass a new task name to start another group. Don't open a second tab for a page you already have: " +
+      "Open a new tab in your session's task group (in the agent's own window). The tab opens in the background: it never becomes " +
+      "the active tab and never takes focus, so the user's window, tab and app stay as they are. Your first call needs a \"task\" name for " +
+      "the whole job the user gave you, and returns a sessionToken — pass it as \"sessionToken\" in every subsequent browser tool call; concurrent " +
+      "agents' sessions never share tabs. Name the task and you must also pass \"longRunning\": whether the job might need more than an hour; " +
+      "a group for a shorter job closes itself after an hour idle. You get one group per session and it holds every tab of the job, however many sub-tasks that spans: " +
+      "later calls omit \"task\" (a name passed anyway is ignored, not a second group). Don't open a second tab for a page you already have: " +
       "use reload or navigate on the existing tab (see tabs_list).",
     inputSchema: {
       url: z.string().url().describe("URL to open (include the scheme, e.g. https://...)"),
@@ -52,13 +52,13 @@ const rawDefs = [
         .min(1)
         .optional()
         .describe(
-          'Task name for the tab group — one word if possible, two at most (e.g. "Research" or "Research competitors"). Required on your first call; afterwards omit it to add the tab to your current task group, or pass a new name to start another.'
+          'Name for your session\'s tab group: the whole job the user asked for, NOT the page you are about to open or the sub-task in front of you — one word if possible, two at most (e.g. "Research" or "Research competitors"). Read once, on your first call; afterwards omit it, since every tab of this session joins that one group.'
         ),
       longRunning: z
         .boolean()
         .optional()
         .describe(
-          "Might this task need more than an hour to complete? Required whenever you pass \"task\". false: the group closes itself (tabs and all) once idle for an hour. true: it stays until unused for 30 days. Pass it without a task to change the current group's answer."
+          "Might this job need more than an hour to complete? Required on the first call of your session, the one that names the task. false: the group closes itself (tabs and all) once idle for an hour. true: it stays until unused for 30 days. To change your group's answer later, pass this on its own — passed alongside a \"task\", it is ignored with the name."
         ),
       sessionToken: z
         .string()
@@ -333,6 +333,19 @@ export function registerTools(server, { bridge, version, updates = null, logger 
   for (const def of toolDefs) {
     server.registerTool(def.name, { description: def.description, inputSchema: def.inputSchema }, async (args) => {
       try {
+        // The sessionToken is stated once, in the first tabs_create result, and
+        // the session it names is meant to run for a whole job — so it is
+        // exactly the detail an agent loses to context compaction. A later
+        // tabs_create without it is a different session: it opens a second tab
+        // group instead of joining the one the job already has. Restating it on
+        // every session-scoped answer keeps it in recent context, whatever the
+        // agent has forgotten. tabs_create names it in its own text already.
+        const echoSession = (mcp) => {
+          const token = args.sessionToken;
+          if (mcp.isError || def.name === "tabs_create" || typeof token !== "string" || !token.trim()) return mcp;
+          mcp.content.push({ type: "text", text: `session: ${token}` });
+          return mcp;
+        };
         if (def.local) {
           const connected = bridge.connected;
           return toMcpResult({
@@ -349,7 +362,7 @@ export function registerTools(server, { bridge, version, updates = null, logger 
             },
           });
         }
-        if (def.name === "browser_batch") return await runBatch(args, bridge, logger);
+        if (def.name === "browser_batch") return echoSession(await runBatch(args, bridge, logger));
         // save_to_disk is a daemon-side concern: the extension has no disk
         // access, so it is stripped here and applied to the returned image.
         const { save_to_disk, ...forwardedArgs } = args;
@@ -382,7 +395,7 @@ export function registerTools(server, { bridge, version, updates = null, logger 
           const line = notice();
           if (line) mcp.content.push({ type: "text", text: line });
         }
-        return mcp;
+        return echoSession(mcp);
       } catch (err) {
         logger.error(`[mcp] ${def.name} failed:`, err.message);
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
