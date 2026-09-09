@@ -69,7 +69,7 @@ document.getElementById("adopt").addEventListener("click", async () => {
     btn.textContent = res?.ok
       ? res.moved > 0
         ? `moved ${res.moved} task group${res.moved === 1 ? "" : "s"} here ✓`
-        : "agent groups already here ✓"
+        : "this window is the agent's now ✓"
       : `failed: ${res?.error || "unknown error"}`;
   } catch (err) {
     btn.textContent = `failed: ${err.message}`;
