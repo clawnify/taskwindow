@@ -102,14 +102,22 @@ function makeChrome() {
               (q.windowId === undefined || t.windowId === q.windowId)
           );
         },
-        async group({ tabIds, groupId }) {
+        // Faithful to Chrome: a group lives in one window, and grouping MOVES
+        // every tab that isn't already there. A new group is created in
+        // createProperties.windowId, or — for a service worker, which has no
+        // window of its own — in the last-focused window, i.e. the user's.
+        async group({ tabIds, groupId, createProperties }) {
           if (gates.group) await gates.group();
           let gid = groupId;
+          let windowId;
           if (gid == null) {
+            windowId = createProperties?.windowId ?? userFocus.id;
             gid = nextGroupId++;
-            groups.set(gid, { id: gid, title: "", color: "" });
+            groups.set(gid, { id: gid, title: "", color: "", windowId });
+          } else {
+            windowId = groups.get(gid)?.windowId ?? userFocus.id;
           }
-          for (const id of tabIds) tabs.get(id).groupId = gid;
+          for (const id of tabIds) Object.assign(tabs.get(id), { groupId: gid, windowId });
           return gid;
         },
         async update(id, props) {

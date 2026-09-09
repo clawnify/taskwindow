@@ -9,6 +9,13 @@ Extension only. Coming from 0.2.6: `taskwindow update`.
 
 ### Fixed
 
+**Task groups stay in the agent's window.** The first tab of every new task was
+yanked into whatever Chrome window you were last looking at, leaving the agent
+window holding nothing but its pinned anchor. Creating a tab group without
+naming a window puts it in Chrome's *current* window — for an extension service
+worker, the window you last focused — and Chrome moves the tab there to join
+it. New groups now say which window they belong to.
+
 **Nothing ever brings a tab forward.** 0.2.6 still made a tab visible before
 mouse input, on the belief that a hidden tab never acknowledges the event, and
 failed the call when that tab was behind yours — which agents then worked
