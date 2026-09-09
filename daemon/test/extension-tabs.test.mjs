@@ -1,9 +1,9 @@
 /**
  * Session-isolation tests for extension/tools/tabs.js (run in Node with a
  * chrome.* mock): concurrent agents must never share tab groups even when
- * they pick the same task name, task names are required, and the legacy
- * pre-session storage shape stays visible to the user but unreachable by
- * tools.
+ * they pick the same task name, a task name is required once and then fixed
+ * (one session, one group), and the legacy pre-session storage shape stays
+ * visible to the user but unreachable by tools.
  *
  * Each test gets a fresh chrome mock plus a fresh module instance (ESM
  * query-string cache buster), since tabs.js closes over the global `chrome`.
@@ -160,23 +160,49 @@ test("tabs_create requires a task name until the session has a group", async () 
   await assert.rejects(() => tabsCreate({ url: "https://example.com", sessionToken: "fresh" }), /no task group yet, so "task" is required/);
 });
 
-test("with a session, the task is remembered: omit it to join the current group, name a new one to switch", async () => {
+test("one session, one group: every later tab joins it, named or not", async () => {
   const mock = makeChrome();
   const { tabsCreate } = await loadTabs(mock);
-  const first = await tabsCreate({ url: "https://a.example", task: "Research Competitors" , longRunning: true});
+  const first = await tabsCreate({ url: "https://a.example", task: "Research Competitors", longRunning: true });
   const token = first.data.sessionToken;
 
   const joined = await tabsCreate({ url: "https://a.example/2", sessionToken: token });
-  assert.equal(joined.data.groupId, first.data.groupId, "no task given: joins the current task group");
+  assert.equal(joined.data.groupId, first.data.groupId, "no task given: joins the session's group");
   assert.equal(joined.data.task, "Research Competitors", "the group's own title, not a lowercased key");
 
-  const switched = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: token , longRunning: true});
-  assert.notEqual(switched.data.groupId, first.data.groupId, "a new name starts another group");
-  const after = await tabsCreate({ url: "https://b.example/2", sessionToken: token });
-  assert.equal(after.data.groupId, switched.data.groupId, "…and it is now the current one");
+  // The sub-task the agent is on ("Fix bug") is not a second job: same group,
+  // same name, and the result says the name was not used.
+  const named = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: token });
+  assert.equal(named.data.groupId, first.data.groupId, "a name on a later call does not start another group");
+  assert.equal(named.data.task, "Research Competitors", "the group keeps the name it was given");
+  assert.equal(named.data.ignoredTask, "Fix bug");
+  assert.match(named.text, /"Fix bug" was not used as a name/);
 
-  const back = await tabsCreate({ url: "https://a.example/3", task: "research competitors", sessionToken: token , longRunning: true});
-  assert.equal(back.data.groupId, first.data.groupId, "naming an earlier task returns to that group");
+  // Even a name the word-count rule would reject: it is never applied, so it
+  // is never judged — the tab still lands in the group.
+  const long = await tabsCreate({ url: "https://c.example", task: "Popover transition check", sessionToken: token });
+  assert.equal(long.data.groupId, first.data.groupId, "an over-long later name is ignored, not rejected");
+  assert.equal(mock.groups.size, 1, "the session made exactly one group");
+});
+
+test("an ignored task name takes its longRunning answer with it", async () => {
+  const { tabsCreate } = await loadTabs(makeChrome());
+  const first = await tabsCreate({ url: "https://a.example", task: "Research competitors", longRunning: true });
+  const token = first.data.sessionToken;
+  assert.equal(first.data.longRunning, true);
+
+  // The agent thinks it is starting a short sub-task. The name is ignored, so
+  // its answer must be too: honouring it would cut the whole job's group down
+  // to the one-hour lifetime.
+  const stray = await tabsCreate({ url: "https://b.example", task: "Fix bug", longRunning: false, sessionToken: token });
+  assert.equal(stray.data.groupId, first.data.groupId);
+  assert.equal(stray.data.longRunning, true, "the group keeps its own answer");
+  assert.match(stray.text, /"longRunning" was not applied either/);
+
+  // Passed on its own it is unambiguous, and revises the group.
+  const revised = await tabsCreate({ url: "https://c.example", longRunning: false, sessionToken: token });
+  assert.equal(revised.data.groupId, first.data.groupId);
+  assert.equal(revised.data.longRunning, false, "passed alone, it revises the group");
 });
 
 test("two agents with the same task name get separate groups and tokens", async () => {
@@ -189,13 +215,13 @@ test("two agents with the same task name get separate groups and tokens", async 
   assert.notEqual(a.data.groupId, b.data.groupId, "same task name, different groups");
 });
 
-test("same sessionToken + same task reuses the group; a new task gets its own", async () => {
+test("same sessionToken reuses the group whatever task is named", async () => {
   const { tabsCreate } = await loadTabs(makeChrome());
   const r1 = await tabsCreate({ url: "https://a.example", task: "Research competitors" , longRunning: true});
   const r2 = await tabsCreate({ url: "https://a.example/2", task: "Research competitors", sessionToken: r1.data.sessionToken , longRunning: true});
   assert.equal(r2.data.groupId, r1.data.groupId, "same session + task reuses the group");
-  const r3 = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: r1.data.sessionToken , longRunning: true});
-  assert.notEqual(r3.data.groupId, r1.data.groupId, "different task in the same session gets its own group");
+  const r3 = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: r1.data.sessionToken });
+  assert.equal(r3.data.groupId, r1.data.groupId, "a different task in the same session joins it too");
 });
 
 test("a session cannot act on another session's tabs", async () => {
@@ -225,9 +251,9 @@ test("tasks from any session share one agent window; only the first opens it", a
   const mock = makeChrome();
   const { tabsCreate } = await loadTabs(mock);
   mock.storage.set("separateWindow", true);
-  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" , longRunning: true});
-  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug" , longRunning: true}); // another agent
-  const c = await tabsCreate({ url: "https://c.example", task: "Third thing", sessionToken: a.data.sessionToken , longRunning: true});
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", longRunning: true });
+  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug", longRunning: true }); // another agent
+  const c = await tabsCreate({ url: "https://c.example", sessionToken: a.data.sessionToken }); // a second tab of session A
 
   assert.equal(a.data.newWindow, true, "the very first task opens the window");
   assert.equal(b.data.newWindow, false);
@@ -361,8 +387,8 @@ test("opening a tab never takes focus from the user's window", async () => {
   const mock = makeChrome();
   const { tabsCreate } = await loadTabs(mock);
   mock.storage.set("separateWindow", true);
-  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors" , longRunning: true}); // opens the window
-  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: a.data.sessionToken , longRunning: true}); // joins it
+  const a = await tabsCreate({ url: "https://a.example", task: "Research competitors", longRunning: true }); // opens the window
+  const b = await tabsCreate({ url: "https://b.example", sessionToken: a.data.sessionToken }); // joins it
 
   assert.equal(mock.windowsCreated.length, 1);
   assert.equal(mock.windowsCreated[0].focused, false, "the agent window is created unfocused");
@@ -381,7 +407,7 @@ test("a tab is never opened as the active tab, whatever window it lands in", asy
 
   // Chrome in the background: still a background tab — the user comes back to what they left.
   mock.userFocus.focused = false;
-  const b = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: a.data.sessionToken , longRunning: true});
+  const b = await tabsCreate({ url: "https://b.example", sessionToken: a.data.sessionToken });
   assert.equal(mock.tabs.get(b.data.id).active, false);
 
   // The agent's own window, adopted by the user and focused: same.
@@ -390,7 +416,7 @@ test("a tab is never opened as the active tab, whatever window it lands in", asy
   mock.storage.set("separateWindow", true);
   a = await tabsCreate({ url: "https://a.example", task: "Research competitors" , longRunning: true}); // agent window 2
   mock.userFocus.id = 2;
-  const c = await tabsCreate({ url: "https://c.example", task: "Fix bug", sessionToken: a.data.sessionToken , longRunning: true});
+  const c = await tabsCreate({ url: "https://c.example", sessionToken: a.data.sessionToken });
   assert.equal(mock.tabs.get(c.data.id).active, false);
   assert.equal(mock.windowFocus.length, 0, "and no window was focused");
 });
@@ -435,15 +461,25 @@ test("default tab resolution is scoped to the session's own groups", async () =>
   await assert.rejects(() => resolveTab(null, null), /sessionToken/);
 });
 
-test("session with two tasks resolves to the current task's group by default", async () => {
-  const { tabsCreate, resolveTab } = await loadTabs(makeChrome());
+// tabs_create can no longer give a session a second group, but sessions from
+// before that rule have several and their tabs must stay reachable.
+test("a session holding several groups resolves to its current task's group by default", async () => {
+  const mock = makeChrome();
   const t = "tok-fixed";
-  const r1 = await tabsCreate({ url: "https://a.example", task: "Research competitors", sessionToken: t , longRunning: true});
-  const r2 = await tabsCreate({ url: "https://b.example", task: "Fix bug", sessionToken: t , longRunning: true});
+  mock.groups.set(60, { id: 60, title: "Research competitors", color: "blue" });
+  mock.groups.set(61, { id: 61, title: "Fix bug", color: "blue" });
+  mock.tabs.set(9, { id: 9, windowId: 1, groupId: 60, url: "https://a.example", title: "", active: false });
+  mock.tabs.set(10, { id: 10, windowId: 1, groupId: 61, url: "https://b.example", title: "", active: true });
+  mock.storage.set("agentGroups", {
+    [t]: { "research competitors": { groupId: 60, lastUsed: 1 }, "fix bug": { groupId: 61, lastUsed: 2 } },
+  });
+  mock.storage.set("currentTask", { [t]: "fix bug" });
+
+  const { resolveTab } = await loadTabs(mock);
   const tab = await resolveTab(null, t);
-  assert.equal(tab.id, r2.data.id, "last-created task is the session's current task");
-  const tab2 = await resolveTab(r1.data.id, t);
-  assert.equal(tab2.id, r1.data.id, "explicit tab of an older task in the same session is reachable");
+  assert.equal(tab.id, 10, "the current task's group answers the default target");
+  const explicit = await resolveTab(9, t);
+  assert.equal(explicit.id, 9, "a tab of the session's other group is still reachable");
 });
 
 test("v1 (pre-session) storage migrates: visible to the user, unreachable by tools", async () => {

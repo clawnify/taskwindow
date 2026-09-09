@@ -10,6 +10,15 @@
  * when they pick the same task name. The token is the capability: tools see
  * and act only on the session's own groups. The user can widen access to all
  * tabs from the options page (allowAllTabs); the agent cannot change it.
+ *
+ * ONE SESSION, ONE GROUP. The group exists to hold every tab of one job, so
+ * the name is asked for once and then fixed: a later tabs_create that names a
+ * task joins the session's group anyway and says so. An agent calling the tool
+ * has its attention on the sub-task in front of it ("check the popover"), not
+ * on the job the user asked for, so any per-call naming path turns the group
+ * into a group of one. Sessions still hold a map of groups because sessions
+ * predating this rule (and the legacy namespace) have several; the read paths
+ * keep serving all of them.
  */
 const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed, longRunning} } }
 const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap long-running groups unused for 30 days
@@ -609,31 +618,37 @@ function replayed(result) {
 }
 
 /**
- * The task group a session is working in, by display title. The current-task
- * map stores the lowercased key, so the title comes from the group itself.
+ * The task group a session is working in, by display title, or null if it has
+ * none yet. The current-task map stores the lowercased key, so the title comes
+ * from the group itself.
  */
 async function rememberedTask(token) {
   const current = await currentTaskName(token);
   const entry = current ? (await agentGroups())[token]?.[current] : null;
-  if (!entry) {
-    throw new Error(
-      'This session has no task group yet, so "task" is required: pass a name describing what the tab group is about — one word if possible, two at most (e.g. "Research" or "Research competitors"). ' +
-        "Later tabs_create calls can omit it to join that group."
-    );
-  }
+  if (!entry) return null;
   const title = await chrome.tabGroups.get(entry.groupId).then((g) => g?.title, () => null);
   return normalizeTask(title || current);
 }
 
 export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
-  // The task is remembered per session like the token, so the agent names it
-  // once: a later call without one joins the session's current task group.
-  const naming = Boolean(String(task ?? "").trim());
-  // Naming a task is the moment the agent knows how long it will take, so the
-  // estimate is required right there; joining the current group needs none
-  // (passing it then updates that group, e.g. a task that turned out longer).
-  if (naming && typeof longRunning !== "boolean") {
+  // The task names the session's one group, so it is read once and then fixed:
+  // once the session has a group, every later tab joins it and a `task` given
+  // anyway is reported back, not applied (see the ONE SESSION, ONE GROUP note
+  // at the top). Only the name that will actually be used is validated.
+  const remembered = await rememberedTask(token);
+  const named = String(task ?? "").trim();
+  const creating = remembered == null; // this call names the session's group
+  if (creating && !named) {
+    throw new Error(
+      'This session has no task group yet, so "task" is required: pass a name for the whole job you are doing for the user — not the page you are about to open — one word if possible, two at most (e.g. "Research" or "Research competitors"). ' +
+        "Every later tab of this session joins that group; omit it from now on."
+    );
+  }
+  // Naming the group is the moment the agent knows how long the job will take,
+  // so the estimate is required right there. Later calls need none, and may
+  // pass one on its own to revise the group (a job that turned out longer).
+  if (creating && typeof longRunning !== "boolean") {
     throw new Error(
       '"longRunning" is required when you pass "task": true if this task might need more than an hour to complete, false if not. ' +
         "A group for a task under an hour closes itself once it has been idle for an hour."
@@ -642,24 +657,49 @@ export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) 
   if (longRunning !== undefined && typeof longRunning !== "boolean") {
     throw new Error('"longRunning" must be true or false');
   }
-  const taskUsed = naming ? requireShortTask(task) : await rememberedTask(token);
+  const taskUsed = remembered ?? requireShortTask(task);
+  // Re-passing the group's own name is not an ignored name: it is the name.
+  const renamed = !creating && named ? normalizeTask(task) : null;
+  const ignoredTask = renamed != null && renamed.toLowerCase() !== taskUsed.toLowerCase() ? renamed : null;
+  // An ignored name takes its answer with it: it was given for the sub-task the
+  // agent thought it was starting, so honouring it would let a stray name cut
+  // the whole job's group down to the one-hour lifetime. `longRunning` alone
+  // still revises the group — that one is unambiguous.
+  const droppedLongRunning = ignoredTask != null && typeof longRunning === "boolean";
+  const longRunningUsed = droppedLongRunning ? undefined : longRunning;
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
 
+  // The note is about THIS call, so it is added outside the coalescing cache:
+  // a replayed result must not inherit the previous caller's naming.
+  const withNote = (result) => {
+    if (ignoredTask == null) return result;
+    return {
+      ...result,
+      data: { ...result.data, ignoredTask },
+      text:
+        `${result.text}\nnote: this session's tab group is "${taskUsed}" and holds every tab of this job, ` +
+        `so "${ignoredTask}" was not used as a name and no second group was made — omit "task" from now on` +
+        (droppedLongRunning
+          ? `; "longRunning" was not applied either, since it answered for "${ignoredTask}" rather than this group — pass it without "task" to change this group's answer`
+          : ""),
+    };
+  };
+
   const inFlight = createsInFlight.get(key);
-  if (inFlight) return replayed(await inFlight);
+  if (inFlight) return withNote(replayed(await inFlight));
   const done = createsDone.get(key);
   if (done && Date.now() - done.at < RETRY_WINDOW_MS && (await chrome.tabs.get(done.result.data.id).then(() => true, () => false))) {
-    return replayed(done.result);
+    return withNote(replayed(done.result));
   }
   createsDone.delete(key);
 
-  const run = openInTaskGroup({ url, taskUsed, token, longRunning });
+  const run = openInTaskGroup({ url, taskUsed, token, longRunning: longRunningUsed });
   createsInFlight.set(key, run);
   try {
     const result = await run;
     for (const [k, v] of createsDone) if (Date.now() - v.at >= RETRY_WINDOW_MS) createsDone.delete(k);
     createsDone.set(key, { result, at: Date.now() });
-    return result;
+    return withNote(result);
   } finally {
     createsInFlight.delete(key);
   }

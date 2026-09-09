@@ -146,6 +146,15 @@ async function main() {
   check("tabs_create without task on a fresh session is rejected by the extension, not the schema",
     noTask.isError === true && /"task" is required/.test(noTask.content?.[0]?.text || ""), `text: ${noTask.content?.[0]?.text}`);
 
+  // The token is named once, at session start, and decays out of an agent's
+  // context; a tabs_create without it opens a second tab group.
+  const echoed = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other", sessionToken: "tok-echo" } });
+  check("a session-scoped result restates the sessionToken as its own trailing block",
+    !echoed.isError && echoed.content.at(-1).text === "session: tok-echo", `blocks: ${JSON.stringify(echoed.content.map((c) => c.text))}`);
+  check("tabs_create does not restate it — its own text already names the token",
+    !created.content.some((c) => /^session: /.test(c.text || "")));
+  check("a tokenless call gets no trailer", !nav.content.some((c) => /^session: /.test(c.text || "")));
+
   console.log("browser_batch:");
   const batch = await client.callTool({
     name: "browser_batch",
