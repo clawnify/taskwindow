@@ -11,8 +11,15 @@
  * and act only on the session's own groups. The user can widen access to all
  * tabs from the options page (allowAllTabs); the agent cannot change it.
  */
-const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed} } }
-const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap groups unused for 30 days
+const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed, longRunning} } }
+const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap long-running groups unused for 30 days
+// A task the agent said would take under an hour is done an hour after its
+// last use: the group closes itself instead of lingering for 30 days.
+const SHORT_TASK_TTL_MS = 60 * 60 * 1000;
+/** Idle time after which a group is reaped. Entries without the flag predate it and keep the long TTL. */
+function groupTtlMs(entry) {
+  return entry.longRunning === false ? SHORT_TASK_TTL_MS : GROUP_TTL_MS;
+}
 const REAP_ALARM = "taskwindow-reap-groups";
 const CURRENT_TASK_KEY = "currentTask"; // { [sessionToken]: taskNameLower }
 const LEGACY_GROUP_KEY = "agentTabGroupId";
@@ -298,9 +305,10 @@ export async function resolveTab(tabId, sessionToken) {
 /**
  * Put a tab into the session's group for `task`, reusing an existing group
  * of the same name within the session (never a duplicate). Records the
- * session's current task.
+ * session's current task. `longRunning` (boolean) sets the group's lifetime
+ * (see groupTtlMs); when undefined the group keeps what it has.
  */
-async function ensureTaskGroup(tabId, taskName, sessionToken) {
+async function ensureTaskGroup(tabId, taskName, sessionToken, longRunning) {
   const token = normalizeToken(sessionToken);
   if (token == null) throw new Error(NEED_SESSION);
   const task = normalizeTask(taskName);
@@ -309,16 +317,19 @@ async function ensureTaskGroup(tabId, taskName, sessionToken) {
     const session = { ...(all[token] || {}) };
     const key = task.toLowerCase();
     let groupId = session[key]?.groupId;
+    const lifetime = (existing) => ({
+      longRunning: typeof longRunning === "boolean" ? longRunning : existing?.longRunning,
+    });
     if (groupId != null) {
       try {
         await bounded(chrome.tabGroups.get(groupId), "tabGroups.get");
         await bounded(chrome.tabs.group({ tabIds: [tabId], groupId }), "tabs.group");
         await bounded(chrome.tabGroups.update(groupId, { color: "blue" }), "tabGroups.update");
-        session[key] = { groupId, lastUsed: Date.now() };
+        session[key] = { groupId, lastUsed: Date.now(), ...lifetime(session[key]) };
         all[token] = session;
         await saveAgentGroups(all);
         await writeCurrentTask(token, key);
-        return { groupId, task };
+        return { groupId, task, longRunning: session[key].longRunning !== false };
       } catch (err) {
         if (err?.chromeTimeout) throw err;
         groupId = null; // group was closed; recreate below
@@ -334,11 +345,11 @@ async function ensureTaskGroup(tabId, taskName, sessionToken) {
       "tabs.group"
     );
     await bounded(chrome.tabGroups.update(groupId, { title: task, color: "blue" }), "tabGroups.update");
-    session[key] = { groupId, lastUsed: Date.now() };
+    session[key] = { groupId, lastUsed: Date.now(), ...lifetime(null) };
     all[token] = session;
     await saveAgentGroups(all);
     await writeCurrentTask(token, key);
-    return { groupId, task };
+    return { groupId, task, longRunning: session[key].longRunning !== false };
   });
 }
 
@@ -434,7 +445,8 @@ export async function groupsSummary() {
 }
 
 /**
- * Reap task groups no session has used in GROUP_TTL_MS. Safety rails: only
+ * Reap task groups no session has used in their TTL (an hour for tasks the
+ * agent said take under an hour, 30 days otherwise). Safety rails: only
  * group ids in our own registry are ever touched (never the user's or
  * another extension's groups), and a group is skipped while any of its tabs
  * is the active tab in its window — the user may be reading it.
@@ -458,7 +470,7 @@ export async function reapIdleGroups() {
           continue;
         }
         const userReadingIt = groupTabs.some((t) => t.active);
-        if (userReadingIt || now - entry.lastUsed < GROUP_TTL_MS) continue;
+        if (userReadingIt || now - entry.lastUsed < groupTtlMs(entry)) continue;
         try {
           await chrome.tabs.remove(groupTabs.map((t) => t.id));
           reaped++;
@@ -613,11 +625,24 @@ async function rememberedTask(token) {
   return normalizeTask(title || current);
 }
 
-export async function tabsCreate({ url, task, sessionToken } = {}) {
+export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   // The task is remembered per session like the token, so the agent names it
   // once: a later call without one joins the session's current task group.
-  const taskUsed = String(task ?? "").trim() ? requireShortTask(task) : await rememberedTask(token);
+  const naming = Boolean(String(task ?? "").trim());
+  // Naming a task is the moment the agent knows how long it will take, so the
+  // estimate is required right there; joining the current group needs none
+  // (passing it then updates that group, e.g. a task that turned out longer).
+  if (naming && typeof longRunning !== "boolean") {
+    throw new Error(
+      '"longRunning" is required when you pass "task": true if this task might need more than an hour to complete, false if not. ' +
+        "A group for a task under an hour closes itself once it has been idle for an hour."
+    );
+  }
+  if (longRunning !== undefined && typeof longRunning !== "boolean") {
+    throw new Error('"longRunning" must be true or false');
+  }
+  const taskUsed = naming ? requireShortTask(task) : await rememberedTask(token);
   const key = [token, taskUsed.toLowerCase(), String(url || "")].join("\n");
 
   const inFlight = createsInFlight.get(key);
@@ -628,7 +653,7 @@ export async function tabsCreate({ url, task, sessionToken } = {}) {
   }
   createsDone.delete(key);
 
-  const run = openInTaskGroup({ url, taskUsed, token });
+  const run = openInTaskGroup({ url, taskUsed, token, longRunning });
   createsInFlight.set(key, run);
   try {
     const result = await run;
@@ -640,7 +665,7 @@ export async function tabsCreate({ url, task, sessionToken } = {}) {
   }
 }
 
-async function openInTaskGroup({ url, taskUsed, token }) {
+async function openInTaskGroup({ url, taskUsed, token, longRunning }) {
   const startedAt = Date.now();
   const separateWindow = await policySeparateWindow();
   const all = await agentGroups();
@@ -695,9 +720,9 @@ async function openInTaskGroup({ url, taskUsed, token }) {
   // A tab is only ever the agent's inside a task group: outside one it is
   // reachable by no session and shows in no popover list. If grouping fails
   // (or stalls, see bounded), close the tab again rather than strand it.
-  let groupId, taskName;
+  let groupId, taskName, isLongRunning;
   try {
-    ({ groupId, task: taskName } = await ensureTaskGroup(tab.id, taskUsed, token));
+    ({ groupId, task: taskName, longRunning: isLongRunning } = await ensureTaskGroup(tab.id, taskUsed, token, longRunning));
   } catch (err) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw new Error(`could not put the new tab in the "${taskUsed}" group (${err.message}); closed it again — retry`);
@@ -719,6 +744,7 @@ async function openInTaskGroup({ url, taskUsed, token }) {
       url: tab.url || url,
       groupId,
       task: taskName,
+      longRunning: isLongRunning,
       sessionToken: token,
       newWindow: createdNewWindow,
       alreadyOpenIn: duplicates,
@@ -727,6 +753,7 @@ async function openInTaskGroup({ url, taskUsed, token }) {
     text:
       `opened tab ${tab.id} in the "${taskName}" group${createdNewWindow ? " in a new window" : ""}: ${tab.url || url}` +
       ` — sessionToken ${token}: pass it as "sessionToken" in every subsequent browser tool call` +
+      (isLongRunning ? "" : " (short task: this group closes itself after an hour idle)") +
       (duplicates.length
         ? `\nnote: this group already had ${duplicates.length === 1 ? "tab" : "tabs"} ${duplicates.join(", ")} at this URL — next time use reload or navigate on that tab instead of opening another`
         : ""),

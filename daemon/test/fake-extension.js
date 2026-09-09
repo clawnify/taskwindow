@@ -81,6 +81,10 @@ function onMessage(raw) {
       reply(false, { error: 'This session has no task group yet, so "task" is required' });
       return;
     }
+    if (typeof msg.params.longRunning !== "boolean") {
+      reply(false, { error: '"longRunning" is required when you pass "task"' });
+      return;
+    }
     reply(true, {
       result: {
         data: { id: 3, title: "New Tab", url: msg.params?.url || "about:blank", sessionToken: msg.params?.sessionToken || null },

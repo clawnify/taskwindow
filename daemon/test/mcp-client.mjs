@@ -135,7 +135,7 @@ async function main() {
   const nav = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other" } });
   check("navigate returns final url/title", !nav.isError && nav.content.at(-1).text.includes("Other"));
 
-  const created = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/", task: "Update notice" } });
+  const created = await client.callTool({ name: "tabs_create", arguments: { url: "https://example.com/", task: "Update notice", longRunning: true } });
   check("tabs_create appends the update notice once, as its own text block",
     !created.isError && created.content.length === 2 && /9\.9\.9 is available/.test(created.content[1].text) && /Ask the user for permission/.test(created.content[1].text));
   check("other tools stay quiet about updates", !tabs.content.some((c) => /is available/.test(c.text || "")));
