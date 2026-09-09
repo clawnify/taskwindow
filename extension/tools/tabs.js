@@ -241,14 +241,29 @@ function deniedError(tabId) {
   );
 }
 
+/**
+ * Record use of whichever session group holds `tab`, if any. Independent of
+ * the access policy: with allowAllTabs the agent may address a group tab
+ * without its token (or with one), and the reaper's idle clock must still
+ * see that use — a short task's group closes an hour after its last use.
+ */
+async function touchGroupOfTab(tab) {
+  if (tab.groupId == null || tab.groupId < 0) return;
+  const all = await agentGroups();
+  for (const [token, session] of Object.entries(all)) {
+    for (const [name, entry] of Object.entries(session)) {
+      if (entry.groupId === tab.groupId) return touchGroup(token, name);
+    }
+  }
+}
+
 async function assertAllowedTab(tab, sessionToken) {
+  await touchGroupOfTab(tab);
   if (await policyAllowsAll()) return;
   const token = normalizeToken(sessionToken);
   if (token == null) throw new Error(NEED_SESSION);
-  const { ids, map } = await allowedGroupIds(token);
+  const { ids } = await allowedGroupIds(token);
   if (!ids.includes(tab.groupId)) throw deniedError(tab.id);
-  const name = Object.entries(map).find(([, e]) => e.groupId === tab.groupId)?.[0];
-  if (name) await touchGroup(token, name);
 }
 
 export async function resolveTab(tabId, sessionToken) {
