@@ -82,6 +82,26 @@ async function main() {
     body: JSON.stringify({ code: pairRequestBody.code }),
   });
   check("pairing codes are single-use", reusedPair.status === 403);
+  const storePair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "chrome-extension://adbfpkbjndcpjihceobeegkokblgifpe" },
+    body: JSON.stringify({}),
+  });
+  check("the Web Store extension pairs by origin without a code", storePair.status === 200 && (await storePair.json()).token === token);
+  const otherOriginPair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "chrome-extension://someotherextensionidsomeotherext" },
+    body: JSON.stringify({}),
+  });
+  check("any other origin still needs a code", otherOriginPair.status === 403);
+  const pageOriginPair = await fetch(`${BASE}/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+    body: JSON.stringify({}),
+  });
+  check("a web page cannot pair by origin", pageOriginPair.status === 403);
+  const healthAfter = await (await fetch(`${BASE}/health`)).json();
+  check("health reports the connected extension's id", healthAfter.extensionId === "fakefakefakefakefakefakefakefake");
 
   // --- MCP client -----------------------------------------------------------
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {

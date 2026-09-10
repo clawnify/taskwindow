@@ -43,6 +43,13 @@ async function dispatchTool(tool, params) {
 connectWs({ version: VERSION, dispatchTool });
 initGroupReaper();
 
+// First install: show the settings page, which says whether the daemon is
+// there and, if not, the two commands that set it up. A store-first user has
+// nothing else telling them the extension needs the CLI.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") chrome.runtime.openOptionsPage();
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "taskwindow:getStatus") {
     sendResponse({ connected: isConnected(), version: VERSION });

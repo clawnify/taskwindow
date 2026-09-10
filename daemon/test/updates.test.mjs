@@ -87,3 +87,14 @@ test("the notice names the versions and tells the agent to ask first", () => {
   assert.match(stale, /extension is 0\.2\.3 while the daemon is 0\.2\.4/);
   assert.doesNotMatch(stale, /is available/);
 });
+
+test("a Web Store extension behind the daemon is Chrome's to update, not a command to run", () => {
+  const lagging = updateNotice({ version: "0.2.4", latest: "0.2.4", extensionVersion: "0.2.3", extensionStore: true });
+  assert.match(lagging, /extension is 0\.2\.3 while the daemon is 0\.2\.4/);
+  assert.match(lagging, /Web Store/);
+  assert.doesNotMatch(lagging, /`taskwindow update`/);
+  const ahead = updateNotice({ version: "0.2.3", latest: "0.2.4", extensionVersion: "0.2.4", extensionStore: true });
+  assert.match(ahead, /`taskwindow update`/);
+  assert.match(ahead, /extension is 0\.2\.4 while the daemon is 0\.2\.3/);
+  assert.equal(updateNotice({ version: "0.2.4", latest: "0.2.4", extensionVersion: "0.2.4", extensionStore: true }), null);
+});

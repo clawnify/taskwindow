@@ -3,6 +3,38 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.8
+
+Extension and daemon. Coming from 0.2.7: `taskwindow update` for the daemon;
+the extension now comes from the Chrome Web Store (see below).
+
+### Changed
+
+**One click in Chrome: the extension is on the Web Store.** Setup used to
+end with Developer mode, Load unpacked and a folder picker, because Chrome
+demands those for an unpacked extension. `taskwindow install` now opens the
+[store listing](https://chromewebstore.google.com/detail/adbfpkbjndcpjihceobeegkokblgifpe)
+instead, and "Add to Chrome" is the whole Chrome side. Chrome then keeps the
+extension current on its own, so `taskwindow update` only updates the daemon,
+and an extension a version behind the daemon is reported as Chrome's to catch
+up on rather than as something to run. Already loaded unpacked? Remove that
+copy in `chrome://extensions` before adding the store one; `taskwindow doctor`
+says which kind is connected. `--extension <zip>` keeps the unpacked route for
+development.
+
+**Pairing happens without a code.** A store install has no folder for the
+installer to leave a setup code in, so the extension pairs by identity
+instead: Chrome stamps its fixed extension id on every request as the origin,
+which no other extension or web page can forge, and the daemon returns its
+token to that origin alone. Unpacked builds keep the one-time code; manual
+pairing with `taskwindow pair` is unchanged.
+
+### Added
+
+**The extension explains itself on first install.** Installed from the store
+before the CLI? The settings page opens with the two commands to run and
+connects by itself once the daemon is up.
+
 ## 0.2.7
 
 Extension and daemon. Coming from 0.2.6: `taskwindow update`.
