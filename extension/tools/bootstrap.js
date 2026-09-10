@@ -5,6 +5,17 @@ export const STORE_EXTENSION_ID = "adbfpkbjndcpjihceobeegkokblgifpe";
 let rejectedCode = null;
 let storePairingRefused = false;
 
+/** Whether a TaskWindow daemon answers on the port — the CLI has been run. */
+export async function daemonReachable(port = 9377) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/health`, { cache: "no-store" });
+    if (!response.ok) return false;
+    return (await response.json().catch(() => ({}))).ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Pair a Web Store install on its own: Chrome stamps this extension's origin
  * on the request, and the daemon returns the token to the store origin

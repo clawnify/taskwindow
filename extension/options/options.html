@@ -28,15 +28,10 @@
         <span id="dot" class="dot"></span>
         <span id="status">checking…</span>
       </div>
-      <div id="setup" hidden>
-        <p class="hint" style="margin-top: 0.75rem;">
-          The extension talks to a small daemon on your machine. If you have not set it up yet, run
-          these in a terminal (needs Node 18+); this page connects on its own once it is running:
-        </p>
-        <pre style="background: #f1f1f1; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85rem; overflow-x: auto;">npm install -g taskwindow
-taskwindow install</pre>
-        <p class="hint">Already set up? Run <code>taskwindow doctor</code> to see what is wrong.</p>
-      </div>
+      <p id="setup" class="hint" style="margin: 0.5rem 0 0;" hidden>
+        Not set up the daemon yet? Follow the <a id="guide" href="#">setup guide</a>. Already did?
+        <code>taskwindow doctor</code> says what is wrong.
+      </p>
     </div>
 
     <div class="card">

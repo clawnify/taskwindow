@@ -52,6 +52,11 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "taskwindow:status") renderStatus(msg.connected === true);
 });
 
+$("guide").addEventListener("click", (event) => {
+  event.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+});
+
 // Pairing: exchange the daemon's printed code for the real token.
 $("pair").addEventListener("click", async () => {
   const status = $("pairStatus");
