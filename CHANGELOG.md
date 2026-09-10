@@ -31,9 +31,12 @@ pairing with `taskwindow pair` is unchanged.
 
 ### Added
 
-**The extension explains itself on first install.** Installed from the store
-before the CLI? The settings page opens with the two commands to run and
-connects by itself once the daemon is up.
+**The extension explains itself on first install, when there is something
+to explain.** Right after "Add to Chrome" the extension checks for the daemon.
+Found one — the installer is driving and pairing is silent — it opens
+nothing. Found none, the user came from the store listing first, so a setup
+guide opens with the two commands to run; it turns green by itself once the
+daemon is up, and Settings links to it for later.
 
 ## 0.2.7
 

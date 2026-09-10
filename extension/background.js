@@ -7,6 +7,7 @@ import { readConsoleMessages, readNetworkRequests } from "./tools/console-net.js
 import { gifRecord } from "./tools/gif.js";
 import { shortcutsList, shortcutsExecute } from "./tools/shortcuts.js";
 import { connectWs, isConnected, reloadExtension } from "./tools/connection.js";
+import { daemonReachable } from "./tools/bootstrap.js";
 import { initGroupReaper } from "./tools/tabs.js";
 
 const VERSION = chrome.runtime.getManifest().version;
@@ -43,11 +44,17 @@ async function dispatchTool(tool, params) {
 connectWs({ version: VERSION, dispatchTool });
 initGroupReaper();
 
-// First install: show the settings page, which says whether the daemon is
-// there and, if not, the two commands that set it up. A store-first user has
-// nothing else telling them the extension needs the CLI.
+// First install: if a daemon already answers, the CLI installer is driving
+// and pairing happens silently — open nothing. Otherwise the user found the
+// store listing first and nothing else tells them the extension needs the
+// CLI, so open the setup guide; it turns green on its own once they run it.
 chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") chrome.runtime.openOptionsPage();
+  if (details.reason !== "install") return;
+  (async () => {
+    const { port } = await chrome.storage.local.get("port");
+    if (await daemonReachable(Number(port) || 9377)) return;
+    chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
+  })();
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

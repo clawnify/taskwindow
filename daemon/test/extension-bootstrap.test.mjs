@@ -79,3 +79,25 @@ test("an unpacked build never tries origin pairing", async () => {
     delete globalThis.fetch;
   }
 });
+
+test("the first-install check only counts a daemon that answers /health with ok", async () => {
+  const calls = [];
+  globalThis.chrome = { runtime: { id: "x" } };
+  let reply = () => new Response(JSON.stringify({ ok: true, version: "0.2.8" }), { status: 200 });
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return reply();
+  };
+  try {
+    const { daemonReachable } = await import("../../extension/tools/bootstrap.js");
+    assert.equal(await daemonReachable(9377), true);
+    assert.equal(calls[0], "http://127.0.0.1:9377/health");
+    reply = () => new Response("<html>something else on the port</html>", { status: 200 });
+    assert.equal(await daemonReachable(9377), false);
+    reply = () => { throw new Error("ECONNREFUSED"); };
+    assert.equal(await daemonReachable(9377), false);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
+});

@@ -30,8 +30,9 @@ In Chrome, click **Add to Chrome**. That is the only click: the extension
 pairs with the daemon on its own, and the installer prints `ready ✓` once
 Chrome is connected. Chrome keeps the extension up to date from the store.
 
-Installed the extension first? Its settings page opens and shows the two
-commands above; it connects by itself as soon as the daemon is running.
+Installed the extension first? A setup guide opens with the two commands
+above and turns green by itself as soon as the daemon is running. Coming from
+the installer, nothing opens.
 
 ### Try it
 
