@@ -4,7 +4,7 @@
  * restarts.
  */
 import { ATTACHED, dropTabState } from "./cdp.js";
-import { claimInstallerBootstrap } from "./bootstrap.js";
+import { claimInstallerBootstrap, claimStorePairing } from "./bootstrap.js";
 
 const DEFAULTS = { port: 9377, token: "" };
 
@@ -21,7 +21,7 @@ function broadcastStatus() {
 async function settings() {
   const stored = await chrome.storage.local.get(["port", "token"]);
   if (!stored.token) {
-    const bootstrapped = await claimInstallerBootstrap();
+    const bootstrapped = (await claimInstallerBootstrap()) || (await claimStorePairing(Number(stored.port) || DEFAULTS.port));
     if (bootstrapped) return bootstrapped;
   }
   return {
@@ -127,6 +127,7 @@ async function connect() {
         type: "hello",
         protocol: 1,
         version,
+        id: chrome.runtime.id,
         userAgent: navigator.userAgent,
         attachedTabs: [...ATTACHED],
       })

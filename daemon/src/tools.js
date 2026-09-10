@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { STORE_EXTENSION_ID } from "./store.js";
 
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
@@ -329,7 +330,11 @@ function toMcpResult(result) {
 }
 
 export function registerTools(server, { bridge, version, updates = null, logger = console }) {
-  const notice = () => updates?.notice({ extensionVersion: bridge.lastHello?.version || null }) ?? null;
+  const notice = () =>
+    updates?.notice({
+      extensionVersion: bridge.lastHello?.version || null,
+      extensionStore: bridge.lastHello?.id === STORE_EXTENSION_ID,
+    }) ?? null;
   for (const def of toolDefs) {
     server.registerTool(def.name, { description: def.description, inputSchema: def.inputSchema }, async (args) => {
       try {

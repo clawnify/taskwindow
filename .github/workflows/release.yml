@@ -59,9 +59,9 @@ jobs:
           cat >> notes.md <<'EOF'
           ## Install
 
-          Run `npm install -g taskwindow@latest`, then `taskwindow install`. The guided installer configures the daemon and selected coding agents, downloads the extension, opens Chrome, and pairs automatically after you load the unpacked folder.
+          Run `npm install -g taskwindow@latest`, then `taskwindow install`. The guided installer configures the daemon and selected coding agents and opens the [Chrome Web Store listing](https://chromewebstore.google.com/detail/adbfpkbjndcpjihceobeegkokblgifpe); the extension pairs on its own after "Add to Chrome" and Chrome keeps it updated.
 
-          Manual archives are attached below. Run `taskwindow doctor` for connection diagnostics or `taskwindow pair` for manual recovery.
+          Manual archives are attached below (the extension zip is for `taskwindow install --extension <zip>`, the unpacked development route). Run `taskwindow doctor` for connection diagnostics or `taskwindow pair` for manual recovery.
 
           See the README for the full guide.
           EOF

@@ -68,20 +68,34 @@ export function updateCheckDisabled(dir, env = process.env) {
   return env.TASKWINDOW_NO_UPDATE_CHECK === "1" || existsSync(join(dir, OPT_OUT_FILE));
 }
 
-/** The line agents get. `null` when everything is current (or unknown). */
-export function updateNotice({ version, latest, extensionVersion }) {
+/**
+ * The line agents get. `null` when everything is current (or unknown).
+ * `extensionStore`: the extension came from the Chrome Web Store, so a version
+ * behind the daemon is Chrome's to catch up on, not something to run.
+ */
+export function updateNotice({ version, latest, extensionVersion, extensionStore = false }) {
   const problems = [];
+  const notes = [];
   if (latest && isNewer(latest, version)) {
     problems.push(`TaskWindow ${latest} is available (this daemon is ${version}).`);
   }
   if (extensionVersion && extensionVersion !== version) {
-    problems.push(`The TaskWindow Chrome extension is ${extensionVersion} while the daemon is ${version}.`);
+    if (extensionStore && !isNewer(extensionVersion, version)) {
+      notes.push(
+        `The TaskWindow Chrome extension is ${extensionVersion} while the daemon is ${version}; ` +
+          "Chrome updates it from the Web Store on its own (usually within a day) — no command fixes this, " +
+          "though the user can click Update on chrome://extensions."
+      );
+    } else {
+      problems.push(`The TaskWindow Chrome extension is ${extensionVersion} while the daemon is ${version}.`);
+    }
   }
-  if (problems.length === 0) return null;
+  if (problems.length === 0) return notes.length ? notes.join(" ") : null;
   return (
     `${problems.join(" ")} Ask the user for permission, then run \`taskwindow update\` in a terminal ` +
     "(about a minute; open tabs survive, the tools reconnect on their own — check with taskwindow_status). " +
-    "Never run it without the user's OK."
+    "Never run it without the user's OK." +
+    (notes.length ? ` ${notes.join(" ")}` : "")
   );
 }
 
@@ -105,8 +119,8 @@ export class UpdateChecker {
     return this.state.latest;
   }
 
-  notice({ extensionVersion } = {}) {
-    return updateNotice({ version: this.version, latest: this.disabled ? null : this.latest, extensionVersion });
+  notice({ extensionVersion, extensionStore } = {}) {
+    return updateNotice({ version: this.version, latest: this.disabled ? null : this.latest, extensionVersion, extensionStore });
   }
 
   /** Refresh if the last check is older than a day (or `force`). Never throws. */

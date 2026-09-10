@@ -17,6 +17,7 @@ import {
   removeExtensionBootstrap,
 } from "./service.js";
 import { PairingManager } from "./pairing.js";
+import { STORE_EXTENSION_ID, STORE_LISTING_URL, STORE_ORIGIN } from "./store.js";
 import {
   readHealth,
   requestPairCode,
@@ -163,16 +164,44 @@ async function ensureDaemon(config, { forceInstall = false, allowInstall = true 
   return health;
 }
 
+function openInChrome(url) {
+  try {
+    execFileSync("open", ["-a", "Google Chrome", url]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Store install (the default): send the user to the listing and wait. The
+ * extension pairs itself — the daemon trusts the store extension's origin —
+ * so the only click is "Add to Chrome". A zip path takes the unpacked route
+ * (development builds), which pairs through the installer-written code file.
+ */
 async function installAndConnectExtension(config, zipPath) {
-  const pairing = await requestPairCode(config);
-  installExtension(zipPath, { port: config.port, pairingCode: pairing.code });
+  const before = await readHealth(config.port);
+  if (before?.extensionConnected) {
+    console.log(`[taskwindow] ready ✓ — daemon v${before.version}, extension v${before.extensionVersion || "unknown"} already connected`);
+    return true;
+  }
+  if (zipPath) {
+    const pairing = await requestPairCode(config);
+    installExtension(zipPath, { port: config.port, pairingCode: pairing.code });
+  } else {
+    console.log(
+      openInChrome(STORE_LISTING_URL)
+        ? `[taskwindow] opened the Chrome Web Store listing — click "Add to Chrome"; TaskWindow connects on its own`
+        : `[taskwindow] install the extension from ${STORE_LISTING_URL} — click "Add to Chrome"; TaskWindow connects on its own`
+    );
+  }
   console.log("[taskwindow] waiting up to 5 minutes for the extension to connect…");
   const health = await waitForExtension(config.port);
   if (!health) {
-    console.error("[taskwindow] extension not connected yet — finish the Chrome steps, then run: taskwindow doctor");
+    console.error("[taskwindow] extension not connected yet — finish the Chrome step, then run: taskwindow doctor");
     return false;
   }
-  removeExtensionBootstrap();
+  if (zipPath) removeExtensionBootstrap();
   console.log(`[taskwindow] ready ✓ — daemon v${health.version}, extension v${health.extensionVersion || "unknown"}`);
   return true;
 }
@@ -183,6 +212,16 @@ function installedExtensionVersion() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether the extension is an unpacked build that `taskwindow update` must
+ * refresh on disk. The connected extension's id settles it; with none
+ * connected, a leftover unpacked folder does.
+ */
+function extensionIsUnpacked(health) {
+  if (health?.extensionId) return health.extensionId !== STORE_EXTENSION_ID;
+  return installedExtensionVersion() !== null;
 }
 
 /**
@@ -240,15 +279,21 @@ async function runDoctor(config) {
   } else {
     console.log("✗ Daemon not running — run: taskwindow install");
   }
-  if (installedVersion) console.log(`✓ Extension files installed (v${installedVersion}, ${extensionInstallDir()})`);
-  else console.log("✗ Extension files not installed — run: taskwindow install");
   if (health?.extensionConnected) {
-    const versionNote = installedVersion && health.extensionVersion && installedVersion !== health.extensionVersion
-      ? ` — installed files are v${installedVersion}; run taskwindow update (or reload the extension in Chrome)`
-      : "";
-    console.log(`✓ Chrome extension connected (v${health.extensionVersion || "unknown"})${versionNote}`);
+    const unpacked = extensionIsUnpacked(health);
+    let note = "";
+    if (unpacked && installedVersion && health.extensionVersion && installedVersion !== health.extensionVersion) {
+      note = ` — installed files are v${installedVersion}; run taskwindow update (or reload the extension in Chrome)`;
+    } else if (unpacked) {
+      note = ` — loaded unpacked from ${extensionInstallDir()}; the Web Store build updates itself: remove this one in chrome://extensions, then run taskwindow install`;
+    } else if (health.extensionVersion && isNewer(health.version, health.extensionVersion)) {
+      note = ` — the daemon is v${health.version}; Chrome updates the extension from the Web Store on its own, or click Update on chrome://extensions`;
+    }
+    console.log(`✓ Chrome extension connected (v${health.extensionVersion || "unknown"}${unpacked ? ", unpacked" : ", Web Store"})${note}`);
+  } else if (installedVersion) {
+    console.log(`✗ Chrome extension not connected — unpacked files are v${installedVersion} at ${extensionInstallDir()}; enable it in Chrome, then run: taskwindow pair`);
   } else {
-    console.log("✗ Chrome extension not connected — enable it in Chrome, then run: taskwindow pair");
+    console.log(`✗ Chrome extension not connected — install it from ${STORE_LISTING_URL} (it pairs on its own), or run: taskwindow install`);
   }
   for (const agent of agents) {
     console.log(`${agent.configured ? "✓" : "○"} ${agent.label}${agent.configured ? " configured" : " not configured"}`);
@@ -286,9 +331,10 @@ function printManualReload() {
  * `taskwindow update`: non-interactive, safe to run mid-session (agents run it
  * with the user's OK). Stage 1 (old CLI): install the newer npm package into
  * the owning prefix, then re-exec the NEW CLI for stage 2 so the rest runs on
- * current code. Stage 2: refresh the extension files, restart the daemon on
- * the new code, then have the extension reload itself — daemon first, because
- * only the new daemon knows how to ask.
+ * current code. Stage 2: restart the daemon on the new code; for an unpacked
+ * extension, first refresh its files and afterwards have it reload itself —
+ * daemon first, because only the new daemon knows how to ask. A Web Store
+ * extension is Chrome's to update, so stage 2 leaves it alone.
  */
 async function runUpdate(config, flags) {
   const force = flags.includes("--force");
@@ -314,10 +360,10 @@ async function runUpdate(config, flags) {
     }
     const health = await readHealth(config.port);
     const filesVersion = installedExtensionVersion();
+    const unpacked = extensionIsUnpacked(health);
     const current =
       health?.version === VERSION &&
-      filesVersion === VERSION &&
-      (!health?.extensionConnected || health.extensionVersion === VERSION);
+      (!unpacked || (filesVersion === VERSION && (!health?.extensionConnected || health.extensionVersion === VERSION)));
     if (current && !force) {
       console.log(`[taskwindow] already up to date (v${VERSION})${latest ? "" : " as far as the local install goes"}`);
       return true;
@@ -325,15 +371,22 @@ async function runUpdate(config, flags) {
   }
 
   // Stage 2 (or nothing newer on npm, but the local pieces disagree).
-  refreshExtensionFiles(zipArg || downloadExtensionZip(VERSION));
-  console.log(`[taskwindow] extension files refreshed (v${installedExtensionVersion() || "?"}, ${extensionInstallDir()})`);
+  const unpacked = zipArg !== null || extensionIsUnpacked(await readHealth(config.port));
+  if (unpacked) {
+    refreshExtensionFiles(zipArg || downloadExtensionZip(VERSION));
+    console.log(`[taskwindow] extension files refreshed (v${installedExtensionVersion() || "?"}, ${extensionInstallDir()})`);
+  }
   await ensureDaemon(config, { forceInstall: true });
   const health = await waitForExtension(config.port, 90_000);
   if (!health) {
     console.log("[taskwindow] the extension did not reconnect — enable TaskWindow in Chrome, then run: taskwindow doctor");
     return false;
   }
-  if (health.extensionVersion !== VERSION) {
+  if (!unpacked) {
+    if (health.extensionVersion !== VERSION) {
+      console.log(`[taskwindow] the extension is v${health.extensionVersion || "?"}; Chrome updates it from the Web Store on its own (or click Update on chrome://extensions)`);
+    }
+  } else if (health.extensionVersion !== VERSION) {
     const reload = await requestExtensionReload(config);
     if (!reload.ok) {
       printManualReload();
@@ -467,6 +520,7 @@ const server = http.createServer(async (req, res) => {
       latestVersion: updates.latest,
       extensionConnected: bridge.connected,
       extensionVersion: bridge.lastHello?.version || null,
+      extensionId: bridge.lastHello?.id || null,
       port: config.port,
     });
     return;
@@ -523,6 +577,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const code = String(body?.code || "").trim().toUpperCase();
+    if (!code) {
+      // No code: only the Web Store extension, recognised by the origin Chrome
+      // stamps on its requests, is trusted. Not counted as a failed attempt —
+      // nothing was guessed.
+      if (req.headers.origin === STORE_ORIGIN) sendJson(res, 200, { token: config.token });
+      else sendJson(res, 403, { error: "a pairing code is required" });
+      return;
+    }
     if (!pairing.claim(code)) {
       pairFailures.push(Date.now());
       sendJson(res, 403, { error: "invalid or expired pairing code" });

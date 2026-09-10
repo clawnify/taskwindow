@@ -4,7 +4,8 @@ function renderStatus(connected) {
   $("dot").className = `dot ${connected ? "on" : "off"}`;
   $("status").textContent = connected
     ? "Connected to the daemon — MCP clients can drive this browser."
-    : "Not connected. Is the daemon running, and does the token below match it?";
+    : "Not connected — waiting for the daemon.";
+  $("setup").hidden = connected;
 }
 
 async function loadShortcuts() {

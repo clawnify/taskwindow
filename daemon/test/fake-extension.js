@@ -24,7 +24,7 @@ function connect() {
 }
 
 function onOpen() {
-  ws.send(JSON.stringify({ type: "hello", protocol: 1, version: "test-fake", userAgent: "FakeChrome/1.0" }));
+  ws.send(JSON.stringify({ type: "hello", protocol: 1, version: "test-fake", id: "fakefakefakefakefakefakefakefake", userAgent: "FakeChrome/1.0" }));
 }
 
 const canned = {

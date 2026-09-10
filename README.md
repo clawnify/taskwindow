@@ -23,14 +23,15 @@ The guided installer:
 
 - shows a checkbox list of detected coding agents (choose any combination, or **None**);
 - installs the background daemon as a login service;
-- downloads the extension to the visible `TaskWindow Extension` folder in your home directory;
-- opens `chrome://extensions` and waits for a verified connection.
+- opens the [TaskWindow listing on the Chrome Web Store](https://chromewebstore.google.com/detail/adbfpkbjndcpjihceobeegkokblgifpe)
+  and waits for a verified connection.
 
-In Chrome, turn on **Developer mode**, click **Load unpacked**, and choose the
-`TaskWindow Extension` folder. Chrome requires these two manual clicks for
-unpacked extensions. TaskWindow then pairs automatically with a short-lived,
-single-use setup code and the installer prints `ready ✓` only after Chrome is
-connected.
+In Chrome, click **Add to Chrome**. That is the only click: the extension
+pairs with the daemon on its own, and the installer prints `ready ✓` once
+Chrome is connected. Chrome keeps the extension up to date from the store.
+
+Installed the extension first? Its settings page opens and shows the two
+commands above; it connects by itself as soon as the daemon is running.
 
 ### Try it
 
@@ -47,7 +48,7 @@ open by a pinned tab no agent can close. Screenshot done. Now try:
 taskwindow update              # update daemon + extension to the latest release, no clicks
 taskwindow doctor              # diagnose daemon, extension, versions, and agents
 taskwindow pair                # create a manual one-time pairing code
-taskwindow install             # re-run first-time setup; also repairs the extension
+taskwindow install             # re-run first-time setup; reopens the store listing if the extension is missing
 taskwindow install --claude    # add Claude Code without repeating setup
 taskwindow install --cursor    # add Cursor without repeating setup
 taskwindow install --opencode  # add OpenCode without repeating setup
@@ -60,7 +61,13 @@ package's latest version at most once a day; create `~/.taskwindow/no-update-che
 to turn that off.
 
 Use `taskwindow install --no-extension` to install only the daemon and selected
-agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
+agents. Developing the extension? `taskwindow install --extension <zip>` unpacks
+a build into the `TaskWindow Extension` folder in your home directory for
+`chrome://extensions` → **Load unpacked**, pairing through a one-time code the
+installer leaves in that folder; `taskwindow update` then refreshes those files
+too. Loaded unpacked before the store listing existed? Remove that copy in
+`chrome://extensions` before adding the store one — two copies would keep
+taking the daemon connection from each other. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
 `Authorization: Bearer <token>`; the token is stored in `~/.taskwindow/token`.
 
 ## What the agent gets
@@ -100,10 +107,12 @@ agents. For another MCP client, connect to `http://127.0.0.1:9377/mcp` with
   that way), so nothing ever brings a tab forward. Clicking a group in the
   popover is the only thing that focuses the agent's window — and that is you
   asking for it.
-- **Pairing**: the daemon listens on 127.0.0.1 only. During setup, the CLI gives
-  the extension a short-lived, single-use code; the long-lived bearer token is
-  returned only after the code is claimed. Manual codes are available with
-  `taskwindow pair`.
+- **Pairing**: the daemon listens on 127.0.0.1 only. Chrome stamps every
+  request the store extension makes with its fixed extension id as the origin,
+  which no other extension or web page can forge, so the daemon hands the
+  bearer token to that origin and nothing else. An unpacked development build
+  pairs with a short-lived, single-use code the installer leaves in its
+  folder; manual codes are available with `taskwindow pair`.
 - **Agent actions are visible**: a phantom cursor and glow show where the
   agent is acting; while it does, Chrome shows a
   *"started debugging this browser"* infobar — an unavoidable Chrome policy

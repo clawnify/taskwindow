@@ -1,5 +1,36 @@
 const BOOTSTRAP_FILE = "taskwindow-bootstrap.json";
+// The Chrome Web Store build's id. Fixed by the store, so the daemon can trust
+// requests carrying this origin without a code.
+export const STORE_EXTENSION_ID = "adbfpkbjndcpjihceobeegkokblgifpe";
 let rejectedCode = null;
+let storePairingRefused = false;
+
+/**
+ * Pair a Web Store install on its own: Chrome stamps this extension's origin
+ * on the request, and the daemon returns the token to the store origin
+ * without a code. Only tried when this really is the store build, and only
+ * until the daemon says no — nothing to guess, so nothing to retry.
+ */
+export async function claimStorePairing(port = 9377) {
+  if (chrome.runtime.id !== STORE_EXTENSION_ID || storePairingRefused) return null;
+  let response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    return null; // daemon not running yet (the user may still be installing the CLI); retry later
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.token) {
+    storePairingRefused = true;
+    return null;
+  }
+  await chrome.storage.local.set({ token: body.token, port });
+  return { token: body.token, port };
+}
 
 /**
  * Redeem the installer-created, short-lived code on first launch. The file
