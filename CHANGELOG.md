@@ -31,6 +31,16 @@ pairing with `taskwindow pair` is unchanged.
 
 ### Added
 
+**Setup recovers from a Web Store build that cannot pair itself.** Chrome
+serves whatever version last passed review, which can trail a release by
+weeks, and a build older than self-pairing leaves `taskwindow install`
+waiting out its five minutes for a connection that was never coming. After a
+quiet minute the installer now prints a pairing code and where to paste it,
+then keeps waiting — so the recovery is ten seconds instead of a dead wait
+and a puzzled `taskwindow doctor`. Nothing is printed when the extension
+pairs on its own, and never on the unpacked path, where a second code would
+invalidate the one the installer just wrote.
+
 **The extension explains itself on first install, when there is something
 to explain.** Right after "Add to Chrome" the extension checks for the daemon.
 Found one — the installer is driving and pairing is silent — it opens

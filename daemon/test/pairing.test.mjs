@@ -20,3 +20,14 @@ test("pairing codes are short-lived and single-use", () => {
   assert.equal(pairing.claim("ABC234"), false);
 });
 
+test("issuing a code invalidates the one before it", () => {
+  // Why the installer never mints a fallback code on the unpacked path: the
+  // code it wrote into the extension's folder would stop working.
+  const codes = ["FIRST2", "SECOND"];
+  const pairing = new PairingManager({ generateCode: () => codes.shift() });
+  assert.equal(pairing.issue().code, "FIRST2");
+  assert.equal(pairing.issue().code, "SECOND");
+  assert.equal(pairing.claim("FIRST2"), false);
+  assert.equal(pairing.claim("SECOND"), true);
+});
+

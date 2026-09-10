@@ -173,6 +173,13 @@ function openInChrome(url) {
   }
 }
 
+// Two-stage wait for the extension. Only a store build old enough to predate
+// origin pairing needs the code, and only the user's Chrome clicks decide when
+// we find out — so offer it once the quiet stretch says something is wrong,
+// not up front where it reads as a step everybody must do.
+const CONNECT_GRACE_MS = 60_000;
+const CONNECT_REMAINING_MS = 4 * 60_000;
+
 /**
  * Store install (the default): send the user to the listing and wait. The
  * extension pairs itself — the daemon trusts the store extension's origin —
@@ -196,7 +203,23 @@ async function installAndConnectExtension(config, zipPath) {
     );
   }
   console.log("[taskwindow] waiting up to 5 minutes for the extension to connect…");
-  const health = await waitForExtension(config.port);
+  let health = await waitForExtension(config.port, CONNECT_GRACE_MS);
+
+  // Still nothing from a store install: the build Chrome served may predate
+  // origin pairing (the Web Store can lag a release by weeks), and that build
+  // has no way to pair itself. A code recovers it in seconds. Never on the
+  // unpacked path — issuing a second code would invalidate the one the
+  // installer just wrote into the extension's folder.
+  if (!health && !zipPath) {
+    const pairing = await requestPairCode(config).catch(() => null);
+    if (pairing) {
+      console.log(`[taskwindow] no connection yet. If Chrome has TaskWindow installed, it is an older build that cannot pair itself:`);
+      console.log(`[taskwindow]   pairing code: ${pairing.code} — open the TaskWindow extension → Settings, enter it, then click Pair`);
+      console.log(`[taskwindow] otherwise just finish "Add to Chrome"; still waiting…`);
+    }
+    health = await waitForExtension(config.port, CONNECT_REMAINING_MS);
+  }
+
   if (!health) {
     console.error("[taskwindow] extension not connected yet — finish the Chrome step, then run: taskwindow doctor");
     return false;
@@ -293,7 +316,7 @@ async function runDoctor(config) {
   } else if (installedVersion) {
     console.log(`✗ Chrome extension not connected — unpacked files are v${installedVersion} at ${extensionInstallDir()}; enable it in Chrome, then run: taskwindow pair`);
   } else {
-    console.log(`✗ Chrome extension not connected — install it from ${STORE_LISTING_URL} (it pairs on its own), or run: taskwindow install`);
+    console.log(`✗ Chrome extension not connected — install it from ${STORE_LISTING_URL} (it pairs on its own); already installed from there? that build predates self-pairing: run taskwindow pair`);
   }
   for (const agent of agents) {
     console.log(`${agent.configured ? "✓" : "○"} ${agent.label}${agent.configured ? " configured" : " not configured"}`);
