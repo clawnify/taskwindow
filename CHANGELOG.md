@@ -3,6 +3,40 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**`set_viewport` reuses its tabs instead of breeding them.** Every call opened
+a fresh harness tab, plus one more tab for each viewport that could not be
+framed — so iterating on a responsive design left a tab group full of
+duplicates of the same page. The view is now opened once per session and
+re-pointed on later calls: changing the url or the viewport list navigates the
+tabs that already exist, a viewport you stop asking for has its tab closed, and
+repeating the same call costs nothing.
+
+**Closing a responsive view actually closes it, and says so honestly.** Two
+separate faults: a `set_viewport` with no viewports and no `sessionToken`
+invented a token, found nothing under it, and answered "no responsive view is
+open (it may have been closed already)" — which reads like success, so agents
+moved on believing they had cleaned up. And even with the right token it
+removed the window the harness was *created* in, which is never the window it
+ends up in, since joining the session's tab group moves it. A tokenless close
+is now an error naming the missing token, a close with nothing to close says
+so plainly, and a real close removes the tabs by id and reports how many.
+
+**A local file no longer costs eight seconds and a pile of tabs.** `<all_urls>`
+does not grant the `file://` scheme — that is the per-extension "Allow access
+to file URLs" toggle — so a `file://` page in the harness iframe never loaded,
+and every call waited out the full frame deadline before falling back. It is
+now checked up front: the frame attempt is skipped and the result names the
+toggle that would make side-by-side work.
+
+**Concurrent agents stop clobbering each other's framing rules.** The
+header-stripping rule used one fixed id for the whole extension, so a second
+session's view silently unscoped the first's. Each session now holds its own
+rule id and releases it on close.
+
 ## 0.2.8
 
 Extension and daemon. Coming from 0.2.7: `taskwindow update` for the daemon;
