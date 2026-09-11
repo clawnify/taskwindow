@@ -128,10 +128,11 @@ const rawDefs = [
   {
     name: "set_viewport",
     description:
-      "Open a responsive view: a dedicated harness window in the current task's tab group rendering the current page in one fixed-size iframe per viewport (media queries, vw/vh and touch resolve exactly per frame; several breakpoints side by side). " +
-      "Sites that refuse framing automatically fall back to a dedicated emulated window per viewport. Only these windows are affected — other windows and tab groups are untouched. " +
+      "Open a responsive view: a harness tab in the current task's tab group rendering the current page in one fixed-size iframe per viewport (media queries, vw/vh and touch resolve exactly per frame; several breakpoints side by side). " +
+      "Sites that refuse framing automatically fall back to a dedicated emulated tab per viewport. Only this session's own tabs are affected — the user's tabs, windows and other sessions' groups are untouched. " +
+      "Calling it again reuses the same tabs: it re-points them at the new url or viewports rather than opening more, so iterating on a design costs no extra tabs. " +
       "Each result reports the page's own innerWidth (trust it over screenshots). Typical flow: set_viewport, computer screenshot / read_page on the returned tabIds, then set_viewport with no arguments to close. " +
-      "Note: frames may render logged out on cookie-partitioned sites — the emulated-window fallback has full cookies.",
+      "Note: frames may render logged out on cookie-partitioned sites — the emulated-tab fallback has full cookies. A file:// page needs \"Allow access to file URLs\" on the extension to frame at all; without it every viewport uses the emulated tab and the result says so.",
     inputSchema: {
       viewports: z.array(z.object({
         width: z.number().int().min(200).max(4000),
