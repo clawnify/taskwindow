@@ -30,7 +30,7 @@ import { UpdateChecker, fetchLatestVersion, isNewer, readUpdateState, updateChec
 import { createRequire } from "node:module";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
-import { inspectAgents, registerClaude, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
+import { inspectAgents, registerClaude, registerCodex, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
 import { clearLine, cursorTo, emitKeypressEvents, moveCursor } from "node:readline";
 
 // `taskwindow install` manages the login service and offers to register the
@@ -42,9 +42,12 @@ const flags = args.slice(1);
 
 const AGENT_CHOICES = [
   ["claude", "Claude Code", registerClaude],
+  ["codex", "Codex", registerCodex],
   ["cursor", "Cursor", registerCursor],
   ["opencode", "OpenCode", registerOpenCode],
 ];
+
+const AGENT_FLAGS = AGENT_CHOICES.map(([id]) => `--${id}`).join("|");
 
 function selectCodingAgents() {
   const agentState = new Map(inspectAgents().map((agent) => [agent.id, agent]));
@@ -121,14 +124,14 @@ function selectCodingAgents() {
 
 async function pickAndRegisterAgents(config) {
   if (!process.stdin.isTTY) {
-    console.log("[taskwindow] non-interactive session — register agents with: taskwindow install --claude|--cursor|--opencode");
+    console.log(`[taskwindow] non-interactive session — register agents with: taskwindow install ${AGENT_FLAGS}`);
     return;
   }
   console.log("Which coding agents should use TaskWindow?");
   console.log("Use ↑/↓ to move, space to select, and enter to confirm.");
   const picks = await selectCodingAgents();
   if (picks.length === 0) {
-    console.log("[taskwindow] skipped coding-agent setup — add one later with taskwindow install --claude|--cursor|--opencode");
+    console.log(`[taskwindow] skipped coding-agent setup — add one later with taskwindow install ${AGENT_FLAGS}`);
     return;
   }
   const registered = [];
@@ -322,7 +325,7 @@ async function runDoctor(config) {
     console.log(`${agent.configured ? "✓" : "○"} ${agent.label}${agent.configured ? " configured" : " not configured"}`);
   }
   if (!agents.some((agent) => agent.configured)) {
-    console.log("  Add an agent with: taskwindow install --claude|--cursor|--opencode");
+    console.log(`  Add an agent with: taskwindow install ${AGENT_FLAGS}`);
   }
   return !!health && health.extensionConnected === true;
 }
@@ -429,16 +432,16 @@ try {
   if (verb === "install") {
     const config = loadConfig();
     const extFlag = flags.indexOf("--extension");
-    const hasAgentFlags = flags.includes("--claude") || flags.includes("--cursor") || flags.includes("--opencode");
+    const hasAgentFlags = AGENT_CHOICES.some(([id]) => flags.includes(`--${id}`));
     const fullInstall = extFlag === -1 && !hasAgentFlags;
     const wantsExtension = extFlag !== -1 || (fullInstall && !flags.includes("--no-extension"));
 
     if (fullInstall) {
       await pickAndRegisterAgents(config);
     } else if (hasAgentFlags) {
-      if (flags.includes("--claude")) registerClaude(config);
-      if (flags.includes("--cursor")) registerCursor(config);
-      if (flags.includes("--opencode")) registerOpenCode(config);
+      for (const [id, , register] of AGENT_CHOICES) {
+        if (flags.includes(`--${id}`)) register(config);
+      }
     }
 
     if (fullInstall || wantsExtension) {

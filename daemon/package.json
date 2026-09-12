@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/pairing.test.mjs test/extension-bootstrap.test.mjs test/extension-tabs.test.mjs test/extension-responsive.test.mjs test/bridge.test.mjs test/tool-contract.test.mjs test/updates.test.mjs && node test/run.mjs"
+    "test": "node --test test/agents.test.mjs test/pairing.test.mjs test/extension-bootstrap.test.mjs test/extension-tabs.test.mjs test/extension-responsive.test.mjs test/bridge.test.mjs test/tool-contract.test.mjs test/updates.test.mjs && node test/run.mjs"
   },
   "engines": {
     "node": ">=18"
