@@ -5,6 +5,19 @@ write these for users. Add the version's section before tagging.
 
 ## Unreleased
 
+### Added
+
+**Codex is now a first-class installer option.** A normal guided install
+detects Codex alongside the other supported agents, and the explicit
+`taskwindow install --codex` command adds TaskWindow as an authenticated
+user-level MCP server shared by the Codex app, CLI, and IDE extension.
+`taskwindow doctor` reports it and `taskwindow uninstall` removes it with the
+other agent registrations.
+
+Registration checks the saved connection and authentication, protects the
+config file containing the token, and restores the original config if setup
+fails. Restart the agent after setup to load the browser tools.
+
 ### Fixed
 
 **`set_viewport` reuses its tabs instead of breeding them.** Every call opened

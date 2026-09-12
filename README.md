@@ -51,9 +51,14 @@ taskwindow doctor              # diagnose daemon, extension, versions, and agent
 taskwindow pair                # create a manual one-time pairing code
 taskwindow install             # re-run first-time setup; reopens the store listing if the extension is missing
 taskwindow install --claude    # add Claude Code without repeating setup
+taskwindow install --codex     # add Codex without repeating setup
 taskwindow install --cursor    # add Cursor without repeating setup
 taskwindow install --opencode  # add OpenCode without repeating setup
 ```
+
+The Codex option requires the `codex` CLI on PATH. It configures the shared
+user-level MCP connection; restart Codex after registration to load the tools.
+If you use `CODEX_HOME`, that directory is respected.
 
 When a newer release exists, agents are told once per session (in the
 `tabs_create` result and in `taskwindow_status`) to ask you before running
