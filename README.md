@@ -1,5 +1,7 @@
 # TaskWindow
 
+[![Add to Chrome](https://img.shields.io/badge/Chrome_Web_Store-Add_to_Chrome-4285F4?logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/adbfpkbjndcpjihceobeegkokblgifpe)
+
 Let any coding agent drive your real, logged-in Chrome — the tabs you're
 already signed into — without touching the windows you're working in.
 
