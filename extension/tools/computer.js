@@ -1,6 +1,10 @@
 import { resolveTab } from "./tabs.js";
 import { indicator } from "./page.js";
 import { withDebugger, send } from "./cdp.js";
+import {
+  humanClick, humanScroll, humanType, humanIdle, glideTo, noteCursor,
+  SCROLL_FLOOR_PX, PASTE_THRESHOLD,
+} from "./human.js";
 
 const KEY_CODES = {
   enter: [13, "Enter"], tab: [9, "Tab"], escape: [27, "Escape"], esc: [27, "Escape"],
@@ -80,7 +84,7 @@ export async function computer(params) {
   const { action } = params;
   const tab = await resolveTab(params.tabId, params.sessionToken);
 
-  if (action !== "screenshot" && action !== "wait") {
+  if (action !== "screenshot" && action !== "wait" && action !== "idle") {
     // Visual "an agent is acting here" feedback, best-effort.
     indicator(tab.id, {
       op: action === "type" || action === "key" ? "focus" : "move",
@@ -139,15 +143,28 @@ export async function computer(params) {
         const y = params.y ?? 0;
         const [button, btnBits] = BUTTONS[action === "left_click" ? "left" : action === "right_click" ? "right" : "middle"];
         const clicks = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
+        if (params.human) {
+          const moves = await humanClick(tabId, { x, y, button, buttons: btnBits, clicks, targetWidth: params.targetWidth });
+          return { text: `${action} at (${x}, ${y}) in tab ${tabId} (human: approached over ${moves} points)` };
+        }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         for (let i = 1; i <= clicks; i++) {
           await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons: btnBits, clickCount: i });
           await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount: i });
         }
+        noteCursor(tabId, x, y);
         return { text: `${action} at (${x}, ${y}) in tab ${tabId}` };
       }
       case "type": {
         if (!params.text) throw new Error('computer "type" requires text');
+        if (params.human) {
+          const typed = await humanType(tabId, params.text);
+          return {
+            text: typed.mode === "paste"
+              ? `pasted ${params.text.length} chars into tab ${tabId} (over ${PASTE_THRESHOLD} chars, so typed the way a human would: as a paste)`
+              : `typed ${typed.keys} chars into tab ${tabId} as real key events`,
+          };
+        }
         await send(tabId, "Input.insertText", { text: params.text });
         return { text: `typed ${params.text.length} chars into tab ${tabId}` };
       }
@@ -173,14 +190,31 @@ export async function computer(params) {
           x = x ?? Math.floor((vp.clientWidth || 800) / 2);
           y = y ?? Math.floor((vp.clientHeight || 600) / 2);
         }
+        if (params.human && Math.hypot(dx, dy) >= SCROLL_FLOOR_PX) {
+          const bursts = await humanScroll(tabId, { x, y, dx, dy });
+          return { text: `scrolled (${dx}, ${dy}) at (${x}, ${y}) in ${bursts} human burst${bursts === 1 ? "" : "s"}` };
+        }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: dx, deltaY: dy });
+        noteCursor(tabId, x, y);
         return { text: `scrolled (${dx}, ${dy}) at (${x}, ${y})` };
       }
       case "mouse_move": {
         const x = params.x ?? 0;
         const y = params.y ?? 0;
+        if (params.human) {
+          const moves = await glideTo(tabId, x, y, { targetWidth: params.targetWidth });
+          return { text: `mouse moved to (${x}, ${y}) along ${moves} points` };
+        }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+        noteCursor(tabId, x, y);
         return { text: `mouse moved to (${x}, ${y})` };
+      }
+      case "idle": {
+        const jiggle = params.dy ?? 0;
+        const stops = await humanIdle(tabId, { jiggle });
+        return {
+          text: `idled: cursor drifted through ${stops} stops${jiggle ? ` plus a ${jiggle}px scroll jiggle (returned to the same offset)` : ""}`,
+        };
       }
       default:
         throw new Error(`unknown computer action "${action}"`);
