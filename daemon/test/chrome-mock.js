@@ -21,6 +21,7 @@ export function makeChrome() {
   const windowIds = new Set([1]); // window 1 is the user's
   const dnrRules = new Map(); // session rule id -> rule
   const cdp = []; // { tabId, method, params } sent through chrome.debugger
+  const messages = []; // { tabId, msg } sent through chrome.tabs.sendMessage
   const attached = new Set();
   // fileAccess: the per-extension "Allow access to file URLs" toggle, which
   // <all_urls> alone does not grant. framingBlocked: the target answers with
@@ -53,6 +54,7 @@ export function makeChrome() {
     windowIds,
     dnrRules,
     cdp,
+    messages,
     chrome: {
       runtime: { getURL: (path) => `chrome-extension://test/${path}` },
       storage: {
@@ -141,7 +143,9 @@ export function makeChrome() {
           Object.assign(tabs.get(id), props);
         },
         onUpdated: { addListener() {}, removeListener() {} },
-        async sendMessage() {},
+        async sendMessage(tabId, msg) {
+          messages.push({ tabId, msg });
+        },
       },
       windows: {
         async getLastFocused() {

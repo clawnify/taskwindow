@@ -75,6 +75,24 @@ export function cursorOf(tabId, viewport) {
   return seeded;
 }
 
+/**
+ * Mirror a pointer event onto the drawn cursor (content/indicator.js), so it
+ * rides the same path at the same pace as the events the page receives, and
+ * its click ring lands with the real press. Fire-and-forget: the cursor is
+ * decoration and must never slow or fail the input it follows.
+ */
+function show(tabId, payload) {
+  try {
+    chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", ...payload }).catch(() => {});
+  } catch {}
+}
+
+/** A real mouseMoved, mirrored. `ms` is how long the drawn cursor takes to follow. */
+async function pointTo(tabId, x, y, ms) {
+  await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  show(tabId, { op: "move", x, y, ms });
+}
+
 /* -------------------------------------------------------------------- path */
 
 /** Fitts's Law movement time in ms; a/b are the classic mouse regression constants. */
@@ -265,13 +283,13 @@ async function viewportOf(tabId) {
 export async function glideTo(tabId, x, y, { targetWidth = 24, viewport } = {}) {
   const from = cursorOf(tabId, viewport || (await viewportOf(tabId)));
   if (Math.hypot(x - from.x, y - from.y) < MOVE_FLOOR_PX) {
-    await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await pointTo(tabId, x, y);
     noteCursor(tabId, x, y);
     return 1;
   }
   const path = movePath(from, { x, y }, { targetWidth });
   for (const step of path) {
-    await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: step.x, y: step.y });
+    await pointTo(tabId, step.x, step.y, step.dt);
     if (step.dt > 4) await sleep(step.dt);
   }
   noteCursor(tabId, x, y);
@@ -284,18 +302,16 @@ export async function humanClick(tabId, { x, y, button, buttons, clicks, targetW
 
   // The hand is never perfectly still on the target before it commits.
   for (let i = 0; i < randInt(1, 2); i++) {
-    await send(tabId, "Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x: round2(x + rand(-1.2, 1.2)),
-      y: round2(y + rand(-1.2, 1.2)),
-    });
-    await sleep(randInt(12, 30));
+    const dwell = randInt(12, 30);
+    await pointTo(tabId, round2(x + rand(-1.2, 1.2)), round2(y + rand(-1.2, 1.2)), dwell);
+    await sleep(dwell);
   }
-  await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await pointTo(tabId, x, y, 20);
   await sleep(randInt(60, 180)); // target acquired, decision made
 
   for (let i = 1; i <= clicks; i++) {
     await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons, clickCount: i });
+    show(tabId, { op: "press", x, y });
     await sleep(randInt(55, 110));
     await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount: i });
     // Stay well inside the double-click threshold, or the OS sees separate clicks.

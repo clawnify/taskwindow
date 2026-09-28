@@ -84,7 +84,14 @@ export async function computer(params) {
   const { action } = params;
   const tab = await resolveTab(params.tabId, params.sessionToken);
 
-  if (action !== "screenshot" && action !== "wait" && action !== "idle") {
+  // A humanised pointer walks a path over time, and human.js mirrors each step
+  // onto the drawn cursor. Jumping it to the target here would put it there
+  // before the real pointer, so only inject the indicator, and wait for it so
+  // the first steps have a listener.
+  const walks = action === "idle" || (params.human && (action.endsWith("_click") || action === "mouse_move"));
+  if (walks) {
+    await indicator(tab.id, { op: "focus" });
+  } else if (action !== "screenshot" && action !== "wait" && action !== "idle") {
     // Visual "an agent is acting here" feedback, best-effort.
     indicator(tab.id, {
       op: action === "type" || action === "key" ? "focus" : "move",
