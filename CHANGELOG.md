@@ -3,7 +3,7 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
-## Unreleased
+## 0.2.9
 
 ### Added
 
