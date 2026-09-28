@@ -99,13 +99,18 @@ const rawDefs = [
       "Actions: screenshot (PNG of the viewport, or full page with fullPage), left_click / right_click / " +
       "middle_click / double_click / triple_click (at x,y), type (text into the focused element), " +
       "key (named key press, e.g. Enter, Tab, Escape, ArrowLeft, Backspace), scroll (by dx/dy pixels), " +
-      "mouse_move, wait. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
-      "read x,y straight off the last screenshot. NOTE: while attached, Chrome shows a " +
+      "mouse_move, wait, idle. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
+      "read x,y straight off the last screenshot. " +
+      "Pass human:true on a click, scroll, type or mouse_move when the plain synthetic event is not working: it moves the " +
+      "pointer along a real path, scrolls as a real wheel gesture, and types real per-key events. That is what lazy-loading " +
+      "lists, infinite scroll, hover-revealed menus and type-ahead inputs are waiting for — they ignore a single jumbo " +
+      "scroll delta, a teleported cursor and insertText. It costs a few hundred ms per action, so reach for it when an " +
+      "action silently does nothing, not by default. NOTE: while attached, Chrome shows a " +
       '"TaskWindow started debugging this browser" infobar — this is unavoidable with CDP-based control.',
     inputSchema: {
       action: z.enum([
         "screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click",
-        "type", "key", "scroll", "mouse_move", "wait",
+        "type", "key", "scroll", "mouse_move", "wait", "idle",
       ]),
       tabId: tabId.optional(),
       x: z.number().int().optional().describe("X coordinate in viewport pixels (clicks, scroll origin, mouse_move)"),
@@ -113,7 +118,27 @@ const rawDefs = [
       text: z.string().optional().describe('Text for the "type" action'),
       key: z.string().optional().describe('Key name for the "key" action, e.g. "Enter", "a", "ArrowDown"'),
       dx: z.number().int().optional().describe("Horizontal scroll delta in pixels"),
-      dy: z.number().int().optional().describe("Vertical scroll delta in pixels (positive scrolls down)"),
+      dy: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          'Vertical scroll delta in pixels (positive scrolls down). For "idle", the amplitude of the scroll jiggle, which is scrolled back so the page ends at the same offset.'
+        ),
+      human: z
+        .boolean()
+        .optional()
+        .describe(
+          "Perform the action the way a hand would: a curved, decelerating pointer path with overshoot and a dwell before the press; a scroll split into uneven wheel bursts so every intermediate position fires; per-character key events instead of a bulk insert. Default false."
+        ),
+      targetWidth: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "With human:true, the width in pixels of the thing being clicked. Fitts's Law uses it to pick the approach speed — a wide button is caught first time, a small one is approached carefully. Default 24."
+        ),
       ms: z.number().int().min(0).max(10_000).optional().describe('Milliseconds for the "wait" action (max 10000)'),
       fullPage: z.boolean().optional().describe('For "screenshot": capture the whole scrollable page instead of the viewport'),
       save_to_disk: z
