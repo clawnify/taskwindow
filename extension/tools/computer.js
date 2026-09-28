@@ -90,6 +90,7 @@ export async function computer(params) {
       op: action === "type" || action === "key" ? "focus" : "move",
       x: params.x,
       y: params.y,
+      click: action.endsWith("_click"),
     });
   }
 
