@@ -124,14 +124,19 @@
     setTimeout(() => ring.remove(), 600);
   }
 
-  function moveTo(x, y, click) {
+  // `step` is set when the move is one point of a path the real pointer is
+  // walking (tools/human.js): follow it linearly over that many ms, so the
+  // path's own pacing shows through. Otherwise glide there on our own.
+  function moveTo(x, y, click, step) {
     ensure();
     // Longer hops take longer, so they read as a glide rather than a jump;
     // capped so a screenshot straight after the action finds the cursor there.
     // The first appearance places it without a glide in from off-screen.
     const d = visible ? Math.hypot(x - at.x, y - at.y) : 0;
-    const ms = visible ? Math.round(Math.min(300, 90 + 70 * Math.log2(1 + d / 16))) : 0;
-    cursor.style.transition = `transform ${ms}ms cubic-bezier(.3,0,.2,1), opacity 200ms`;
+    const glide = step ?? Math.round(Math.min(300, 90 + 70 * Math.log2(1 + d / 16)));
+    const ms = visible ? glide : 0;
+    const easing = step == null ? "cubic-bezier(.3,0,.2,1)" : "linear";
+    cursor.style.transition = `transform ${ms}ms ${easing}, opacity 200ms`;
     cursor.style.transform = `translate3d(${x - TIP}px, ${y - TIP}px, 0)`;
     cursor.style.opacity = "1";
     visible = true;
@@ -144,7 +149,12 @@
     if (msg?.type !== "taskwindow:indicator") return;
     try {
       if (msg.op === "move" && typeof msg.x === "number" && typeof msg.y === "number") {
-        moveTo(msg.x, msg.y, msg.click === true);
+        const step = Number.isFinite(msg.ms) ? Math.min(Math.max(msg.ms, 0), 1000) : undefined;
+        moveTo(msg.x, msg.y, msg.click === true, step);
+      } else if (msg.op === "press" && typeof msg.x === "number" && typeof msg.y === "number") {
+        // The real button just went down here: ring now, not after a glide.
+        if (!visible) moveTo(msg.x, msg.y, false);
+        pulse(msg.x, msg.y);
       } else if (msg.op === "focus") {
         ensure();
         showGlow();

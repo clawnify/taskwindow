@@ -275,3 +275,56 @@ test("a Chromium without the experimental gesture command still scrolls, in tick
   const total = wheels.reduce((a, w) => a + w.params.deltaY, 0);
   assert.ok(Math.abs(total - 900) < 1, `ticks must still sum to the requested delta, got ${total}`);
 });
+
+/* ---------------------------------------------------------- drawn cursor */
+
+const shown = (mock, op) =>
+  mock.messages.filter((m) => m.msg?.type === "taskwindow:indicator" && m.msg.op === op).map((m) => m.msg);
+
+test("the drawn cursor retraces the real pointer's path and rings on the real press", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+  mock.messages.length = 0;
+
+  await computer({ action: "left_click", human: true, x: 640, y: 420, targetWidth: 90, tabId, sessionToken: token });
+
+  const real = mouse(mock, "mouseMoved").map((c) => [c.params.x, c.params.y]);
+  const drawn = shown(mock, "move").map((m) => [m.x, m.y]);
+  assert.deepEqual(drawn, real, "one drawn step per real move, in order, and no jump to the target ahead of them");
+  assert.ok(shown(mock, "move").every((m) => Number.isFinite(m.ms)), "each step says how long to follow it");
+  const presses = shown(mock, "press");
+  assert.equal(presses.length, 1);
+  assert.deepEqual([presses[0].x, presses[0].y], [640, 420]);
+  const kinds = mock.messages.map((m) => m.msg.op);
+  assert.ok(kinds.indexOf("press") > kinds.lastIndexOf("move"), "the ring comes after the cursor arrives");
+  assert.equal(kinds[0], "focus", "the indicator is injected before the first step");
+});
+
+test("idle drift moves the drawn cursor along with the real one", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+  mock.messages.length = 0;
+
+  await computer({ action: "idle", tabId, sessionToken: token });
+
+  const real = mouse(mock, "mouseMoved").map((c) => [c.params.x, c.params.y]);
+  assert.ok(real.length >= 2);
+  assert.deepEqual(shown(mock, "move").map((m) => [m.x, m.y]), real);
+  assert.equal(shown(mock, "press").length, 0);
+});
+
+test("a plain click still sends one glide with a ring and no per-step moves", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.messages.length = 0;
+
+  await computer({ action: "left_click", x: 50, y: 60, tabId, sessionToken: token });
+  await new Promise((r) => setTimeout(r, 0)); // the plain indicator call is fire-and-forget
+
+  const moves = shown(mock, "move");
+  assert.equal(moves.length, 1);
+  assert.deepEqual([moves[0].x, moves[0].y, moves[0].click, moves[0].ms], [50, 60, true, undefined]);
+  assert.equal(shown(mock, "press").length, 0);
+});

@@ -30,6 +30,10 @@ speed for the thing being clicked.
 The new `computer` action `idle` drifts the cursor without clicking; with `dy`
 it also rocks the wheel by that many pixels and returns to the same offset.
 
+The cursor drawn on the page follows the same path at the same pace, and its
+click ring appears when the button actually goes down, so what you watch is
+what the page received.
+
 Off by default: it costs a few hundred milliseconds per action.
 
 **Codex is now a first-class installer option.** A normal guided install
