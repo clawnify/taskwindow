@@ -84,10 +84,36 @@ taking the daemon connection from each other. For another MCP client, connect to
 |---|---|
 | Status | `taskwindow_status` (daemon/extension readiness and recovery guidance) |
 | Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate`, `reload` |
-| See | `computer` (screenshot + click/type/key/scroll), `read_page`, `find`, `get_page_text` |
+| See | `computer` (screenshot + click/type/key/scroll/idle, plus `human` mode), `read_page`, `find`, `get_page_text` |
 | Act | `form_input`, `file_upload`, `upload_image`, `javascript_execute` |
 | Debug | `read_console_messages`, `read_network_requests` |
 | Efficiency | `browser_batch` (multi-step in one call), `gif_record`, `set_viewport` (responsive view), `shortcuts_*` |
+
+## Wonder: when synthetic input is not enough
+
+Some pages ignore a perfect click. A single wheel event carrying 1600px gives
+the page two `scroll` events instead of the ninety-nine a real wheel produces,
+so infinite scroll never loads the next batch and lazy images stay blank. A
+cursor that teleports onto a button never fires the `mouseenter` a hover menu
+opens on. `Input.insertText` fires no key events at all, so a type-ahead search
+box stays empty however right the text looks.
+
+Pass `human: true` to `computer` and the action is performed the way a hand
+does it: the pointer travels a curved, decelerating path with an overshoot and
+a dwell before the press, a scroll becomes several uneven wheel gestures, and
+text is typed as real per-character key events. The coordinates and deltas you
+asked for are exact — the variation is in the journey, never the destination.
+
+It costs a few hundred milliseconds per action, so it is off by default: reach
+for it when an action silently does nothing.
+
+There is also `action: "idle"`, which drifts the cursor around for a moment
+without clicking anything; give it a `dy` and it also rocks the wheel by that
+many pixels and puts it back.
+
+The resemblance to a person is a side effect of fixing the events, not a
+promise about bot detection — Bézier-curve cursors are the *labelled bot class*
+in the mouse-dynamics literature, so do not build on it as camouflage.
 
 ## How the isolation works
 

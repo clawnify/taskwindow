@@ -4,6 +4,7 @@
  * restarts.
  */
 import { ATTACHED, dropTabState } from "./cdp.js";
+import { dropCursor } from "./human.js";
 import { claimInstallerBootstrap, claimStorePairing } from "./bootstrap.js";
 
 const DEFAULTS = { port: 9377, token: "" };
@@ -62,7 +63,10 @@ export function connectWs({ version: v, dispatchTool: dispatch } = {}) {
     if (alarm.name === "taskwindow-reconnect" && (!ws || ws.readyState === WebSocket.CLOSED)) connect();
   });
 
-  chrome.tabs.onRemoved.addListener((tabId) => dropTabState(tabId));
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    dropTabState(tabId);
+    dropCursor(tabId);
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && (changes.token || changes.port)) {
       if (ws) try { ws.close(); } catch {}

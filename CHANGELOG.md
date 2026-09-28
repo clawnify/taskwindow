@@ -7,6 +7,31 @@ write these for users. Add the version's section before tagging.
 
 ### Added
 
+**Wonder: `human` mode for input that pages actually react to.** Pass
+`human: true` to `computer` on a click, scroll, type or `mouse_move` and the
+action reaches the page as the event stream a real hand produces rather than
+one synthetic jump.
+
+This is a correctness fix more than a cosmetic one. A single wheel event
+carrying 1600px gave the page two `scroll` events where a real wheel gives
+ninety-nine, so infinite scroll, lazy images and anything gated on
+`IntersectionObserver` simply never fired. A cursor that teleported onto a
+button never fired the `mouseenter` that opens a hover menu. `Input.insertText`
+fires no key events at all, so type-ahead and autocomplete inputs stayed empty.
+
+Pointer moves now follow a curved, decelerating path with an overshoot and a
+dwell before the press; scrolls are split into uneven wheel gestures using
+Chrome's own smooth-scroll synthesiser; text is typed character by character
+with human intervals (and pasted above 200 characters, as a person would).
+Coordinates and deltas land exactly where you asked — the variation is in the
+path, never the destination. `targetWidth` lets Fitts's Law pick the approach
+speed for the thing being clicked.
+
+The new `computer` action `idle` drifts the cursor without clicking; with `dy`
+it also rocks the wheel by that many pixels and returns to the same offset.
+
+Off by default: it costs a few hundred milliseconds per action.
+
 **Codex is now a first-class installer option.** A normal guided install
 detects Codex alongside the other supported agents, and the explicit
 `taskwindow install --codex` command adds TaskWindow as an authenticated
