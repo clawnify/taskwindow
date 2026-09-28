@@ -20,6 +20,15 @@ fails. Restart the agent after setup to load the browser tools.
 
 ### Fixed
 
+**The agent's cursor points where it clicks, and looks like TaskWindow.** The
+arrow drew 3px right of and 1px below the real click point, so a screenshot
+taken to check a target showed the cursor slightly off it. The tip now sits on
+the exact point. The black arrow is replaced by one filled with the blue
+texture from the icon, drifting slowly so it looks alive while it waits. Longer
+moves glide for longer, up to 300ms, and each click shows a brief ring. Page
+styles can no longer restyle the cursor, and reduced motion turns off the
+drift and the ring.
+
 **`set_viewport` reuses its tabs instead of breeding them.** Every call opened
 a fresh harness tab, plus one more tab for each viewport that could not be
 framed — so iterating on a responsive design left a tab group full of
