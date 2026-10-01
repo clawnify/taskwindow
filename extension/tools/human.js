@@ -78,7 +78,7 @@ export function cursorOf(tabId, viewport) {
 /**
  * Mirror a pointer event onto the drawn cursor (content/indicator.js), so it
  * rides the same path at the same pace as the events the page receives, and
- * its click ring lands with the real press. Fire-and-forget: the cursor is
+ * its press dip lands with the real press. Fire-and-forget: the cursor is
  * decoration and must never slow or fail the input it follows.
  */
 function show(tabId, payload) {
@@ -296,8 +296,93 @@ export async function glideTo(tabId, x, y, { targetWidth = 24, viewport } = {}) 
   return path.length;
 }
 
-/** Approach, settle, dwell, then press and release with a human hold. */
-export async function humanClick(tabId, { x, y, button, buttons, clicks, targetWidth }) {
+/* --------------------------------------------------------------- aim ---- */
+
+/**
+ * Where on a control the press lands. A hand does not hit the exact centre, so
+ * the point moves off the requested one, but only a little: agents check a
+ * click by screenshot, and the cursor there must still sit plainly on the
+ * control they meant. At most 20% of the control's size, capped at 6px across
+ * and 3px down, mostly much less, and never within 2px of the control's edge.
+ */
+export function aimOffset(x, y, rect) {
+  const capX = Math.min(0.2 * rect.width, 6);
+  const capY = Math.min(0.2 * rect.height, 3);
+  const at = {
+    x: Math.round(x + clamp(gauss(0, capX / 2), -capX, capX)),
+    y: Math.round(y + clamp(gauss(0, capY / 2), -capY, capY)),
+  };
+  const inside =
+    at.x >= rect.left + 2 && at.x <= rect.left + rect.width - 2 &&
+    at.y >= rect.top + 2 && at.y <= rect.top + rect.height - 2;
+  return inside ? at : { x, y };
+}
+
+/**
+ * Runs in the tab (the extension's isolated world, so page scripts cannot
+ * patch what it calls). With one point: the box of the control under it, or
+ * null where the pixel itself is the point — no control, a frame, a canvas or
+ * video, a slider, a text box that already holds text (the click places the
+ * caret). With a second point: whether that one still lands on the same control.
+ */
+export function pageAim(x, y, nx, ny) {
+  const CONTROL =
+    "button, a[href], label, select, summary, textarea, input, [role=button], [role=link], [role=checkbox], " +
+    "[role=radio], [role=switch], [role=tab], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=option]";
+  const deepHit = (px, py) => {
+    let el = document.elementFromPoint(px, py);
+    while (el?.shadowRoot) {
+      const inner = el.shadowRoot.elementFromPoint(px, py);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    return el;
+  };
+  const controlOf = (el) => {
+    for (let n = el; n; n = n.parentElement || n.getRootNode().host) {
+      if (n.nodeType === 1 && n.matches(CONTROL)) return n;
+    }
+    return null;
+  };
+  const hit = deepHit(x, y);
+  if (!hit || /^(IFRAME|FRAME|CANVAS|VIDEO|EMBED|OBJECT)$/.test(hit.tagName)) return null;
+  const control = controlOf(hit);
+  if (!control || control.isContentEditable || control.matches("input[type=range]")) return null;
+  const textBox = control.matches(
+    "textarea, input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], " +
+      "input[type=tel], input[type=password], input[type=number]"
+  );
+  if (textBox && control.value !== "") return null;
+  if (nx == null) {
+    const r = control.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  }
+  const again = deepHit(nx, ny);
+  return !!again && controlOf(again) === control;
+}
+
+/** The press point for a click at (x, y): slightly off it on the same control, or exactly it. */
+async function aimAt(tabId, x, y) {
+  const probe = (args) =>
+    chrome.scripting.executeScript({ target: { tabId }, func: pageAim, args }).then((r) => r?.[0]?.result);
+  try {
+    const rect = await probe([x, y, null, null]);
+    if (!rect || ![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite)) return { x, y };
+    const at = aimOffset(x, y, rect);
+    if (at.x === x && at.y === y) return at;
+    return (await probe([x, y, at.x, at.y])) === true ? at : { x, y };
+  } catch {
+    return { x, y }; // a page we cannot script (chrome://, the store): the requested pixel
+  }
+}
+
+/**
+ * Approach, settle, dwell, then press and release with a human hold. The press
+ * lands a little off (x, y) but on the same control (see aimAt); returns the
+ * number of moves and where it pressed.
+ */
+export async function humanClick(tabId, { x: askedX, y: askedY, button, buttons, clicks, targetWidth }) {
+  const { x, y } = await aimAt(tabId, askedX, askedY);
   const moves = await glideTo(tabId, x, y, { targetWidth });
 
   // The hand is never perfectly still on the target before it commits.
@@ -317,7 +402,7 @@ export async function humanClick(tabId, { x, y, button, buttons, clicks, targetW
     // Stay well inside the double-click threshold, or the OS sees separate clicks.
     if (i < clicks) await sleep(randInt(70, 140));
   }
-  return moves;
+  return { moves, x, y };
 }
 
 /**

@@ -27,6 +27,9 @@ export function makeChrome() {
   // <all_urls> alone does not grant. framingBlocked: the target answers with
   // X-Frame-Options/CSP that the DNR rules failed to strip.
   const flags = { raiseOnCreate: false, fileAccess: false, framingBlocked: false };
+  // hooks.script(func, args): stands in for the page when a test needs an
+  // injected function's answer; return undefined to fall through.
+  const hooks = {};
 
   // Chrome keeps no empty groups: the last tab leaving destroys the group.
   function reapEmptyGroups() {
@@ -55,6 +58,7 @@ export function makeChrome() {
     dnrRules,
     cdp,
     messages,
+    hooks,
     chrome: {
       runtime: { getURL: (path) => `chrome-extension://test/${path}` },
       storage: {
@@ -177,9 +181,13 @@ export function makeChrome() {
       // ?widths= parameter, pointed at its own ?url=. A frame that Chrome would
       // refuse to load simply isn't there — which is how the caller finds out.
       scripting: {
-        async executeScript({ target: { tabId, allFrames }, func }) {
+        async executeScript({ target: { tabId, allFrames }, func, args }) {
           const tab = tabs.get(tabId);
           if (!tab) throw new Error(`No tab with id ${tabId}`);
+          if (func && hooks.script) {
+            const result = hooks.script(func, args);
+            if (result !== undefined) return [{ frameId: 0, result }];
+          }
           const self = { frameId: 0, result: { href: tab.url, w: 1280, h: 900, touch: 0 } };
           if (!allFrames || !String(tab.url).includes("responsive.html")) return [self];
           const params = new URLSearchParams(String(tab.url).split("?")[1] || "");

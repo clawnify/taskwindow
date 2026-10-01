@@ -281,7 +281,7 @@ test("a Chromium without the experimental gesture command still scrolls, in tick
 const shown = (mock, op) =>
   mock.messages.filter((m) => m.msg?.type === "taskwindow:indicator" && m.msg.op === op).map((m) => m.msg);
 
-test("the drawn cursor retraces the real pointer's path and rings on the real press", async () => {
+test("the drawn cursor retraces the real pointer's path and dips on the real press", async () => {
   const mock = makeChrome();
   const { computer, token, tabId } = await session(mock);
   mock.cdp.length = 0;
@@ -297,7 +297,7 @@ test("the drawn cursor retraces the real pointer's path and rings on the real pr
   assert.equal(presses.length, 1);
   assert.deepEqual([presses[0].x, presses[0].y], [640, 420]);
   const kinds = mock.messages.map((m) => m.msg.op);
-  assert.ok(kinds.indexOf("press") > kinds.lastIndexOf("move"), "the ring comes after the cursor arrives");
+  assert.ok(kinds.indexOf("press") > kinds.lastIndexOf("move"), "the press comes after the cursor arrives");
   assert.equal(kinds[0], "focus", "the indicator is injected before the first step");
 });
 
@@ -315,7 +315,7 @@ test("idle drift moves the drawn cursor along with the real one", async () => {
   assert.equal(shown(mock, "press").length, 0);
 });
 
-test("a plain click still sends one glide with a ring and no per-step moves", async () => {
+test("a plain click still sends one glide marked as a click and no per-step moves", async () => {
   const mock = makeChrome();
   const { computer, token, tabId } = await session(mock);
   mock.messages.length = 0;
@@ -327,4 +327,90 @@ test("a plain click still sends one glide with a ring and no per-step moves", as
   assert.equal(moves.length, 1);
   assert.deepEqual([moves[0].x, moves[0].y, moves[0].click, moves[0].ms], [50, 60, true, undefined]);
   assert.equal(shown(mock, "press").length, 0);
+});
+
+/* ------------------------------------------------------------------ aim */
+
+test("aimOffset stays small: a checkbox moves a pixel or three, a button a few more, never near an edge", async () => {
+  const { human } = await load(makeChrome());
+  const cases = [
+    { rect: { left: 92, top: 92, width: 16, height: 16 }, at: [100, 100], capX: 3.2, capY: 3 }, // checkbox
+    { rect: { left: 481, top: 17, width: 404, height: 32 }, at: [683, 33], capX: 6, capY: 3 }, // search box
+    { rect: { left: 10, top: 10, width: 6, height: 6 }, at: [13, 13], capX: 1.2, capY: 1.2 }, // tiny
+  ];
+  for (const { rect, at, capX, capY } of cases) {
+    let moved = 0;
+    for (let i = 0; i < 3000; i++) {
+      const p = human.aimOffset(at[0], at[1], rect);
+      // Rounding to whole pixels can add up to half a pixel to the cap.
+      assert.ok(Math.abs(p.x - at[0]) <= capX + 0.5 && Math.abs(p.y - at[1]) <= capY + 0.5, `(${p.x}, ${p.y}) strayed from (${at})`);
+      const exact = p.x === at[0] && p.y === at[1];
+      if (!exact) {
+        moved++;
+        assert.ok(p.x >= rect.left + 2 && p.x <= rect.left + rect.width - 2, `x ${p.x} too close to the edge`);
+        assert.ok(p.y >= rect.top + 2 && p.y <= rect.top + rect.height - 2, `y ${p.y} too close to the edge`);
+      }
+    }
+    if (rect.width >= 16) assert.ok(moved > 1500, `a ${rect.width}px control should usually be pressed off-centre, moved ${moved}/3000`);
+  }
+});
+
+/** The page's answers to pageAim: the control's box, then whether the moved point still hits it. */
+function pageWith(mock, rect, sameControl) {
+  const calls = [];
+  mock.hooks.script = (func, args) => {
+    if (func.name !== "pageAim") return undefined;
+    calls.push(args);
+    return args[2] == null ? rect : sameControl;
+  };
+  return calls;
+}
+
+test("a human click presses slightly off the point, on the same control, and the cursor goes there too", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  const calls = pageWith(mock, { left: 481, top: 17, width: 404, height: 32 }, true);
+  let off = 0;
+  for (let i = 0; i < 12; i++) {
+    mock.cdp.length = 0;
+    mock.messages.length = 0;
+    const res = await computer({ action: "left_click", human: true, x: 683, y: 33, targetWidth: 404, tabId, sessionToken: token });
+    const down = mouse(mock, "mousePressed")[0].params;
+    const up = mouse(mock, "mouseReleased")[0].params;
+    const moves = mouse(mock, "mouseMoved");
+    const last = moves[moves.length - 1].params;
+    assert.ok(Math.abs(down.x - 683) <= 6.5 && Math.abs(down.y - 33) <= 3.5, `pressed at (${down.x}, ${down.y})`);
+    assert.deepEqual([up.x, up.y], [down.x, down.y], "release where it pressed");
+    assert.deepEqual([last.x, last.y], [down.x, down.y], "the pointer settles on the press point");
+    assert.deepEqual(shown(mock, "press").map((m) => [m.x, m.y]), [[down.x, down.y]], "the drawn press is where the real one was");
+    if (down.x !== 683 || down.y !== 33) {
+      off++;
+      assert.match(res.text, new RegExp(`pressed at \\(${down.x}, ${down.y}\\) on the same element`));
+    }
+  }
+  assert.ok(off >= 6, `most presses on a wide box land off-centre, got ${off}/12`);
+  assert.ok(calls.some((a) => a[2] != null), "a moved point is checked against the page before use");
+});
+
+test("if the moved point would land on something else, the click goes exactly where asked", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  pageWith(mock, { left: 481, top: 17, width: 404, height: 32 }, false);
+  for (let i = 0; i < 8; i++) {
+    mock.cdp.length = 0;
+    const res = await computer({ action: "left_click", human: true, x: 683, y: 33, tabId, sessionToken: token });
+    const down = mouse(mock, "mousePressed")[0].params;
+    assert.deepEqual([down.x, down.y], [683, 33]);
+    assert.doesNotMatch(res.text, /pressed at/);
+  }
+});
+
+test("where the spot itself matters (the page answers null), the click goes exactly where asked", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  pageWith(mock, null, true);
+  mock.cdp.length = 0;
+  await computer({ action: "left_click", human: true, x: 300, y: 200, tabId, sessionToken: token });
+  const down = mouse(mock, "mousePressed")[0].params;
+  assert.deepEqual([down.x, down.y], [300, 200]);
 });

@@ -152,8 +152,9 @@ export async function computer(params) {
         const [button, btnBits] = BUTTONS[action === "left_click" ? "left" : action === "right_click" ? "right" : "middle"];
         const clicks = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
         if (params.human) {
-          const moves = await humanClick(tabId, { x, y, button, buttons: btnBits, clicks, targetWidth: params.targetWidth });
-          return { text: `${action} at (${x}, ${y}) in tab ${tabId} (human: approached over ${moves} points)` };
+          const hit = await humanClick(tabId, { x, y, button, buttons: btnBits, clicks, targetWidth: params.targetWidth });
+          const off = hit.x !== x || hit.y !== y ? `, pressed at (${hit.x}, ${hit.y}) on the same element` : "";
+          return { text: `${action} at (${x}, ${y}) in tab ${tabId} (human: approached over ${hit.moves} points${off})` };
         }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         for (let i = 1; i <= clicks; i++) {
