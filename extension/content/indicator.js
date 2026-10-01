@@ -55,22 +55,14 @@
     <path d="${ARROW}" fill="url(#fill)" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>
   </svg>`;
 
-  const RING_SVG = `<svg width="30" height="30" viewBox="-15 -15 30 30" xmlns="http://www.w3.org/2000/svg">
-    <circle r="11" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="4.5"/>
-    <circle r="11" fill="none" stroke="url(#fill)" stroke-width="3"/>
-  </svg>`;
 
   const SHADOW_CSS = `
     .cursor { position: fixed; top: 0; left: 0; opacity: 0; will-change: transform; }
     .arrow { display: block; overflow: visible; transform-origin: ${TIP}px ${TIP}px; transition: transform 90ms ease-out;
              filter: drop-shadow(0 1px 1.5px rgba(8,15,35,.45)) drop-shadow(0 3px 6px rgba(8,15,35,.18)); }
     .press .arrow { transform: scale(.86); }
-    .ring { position: fixed; width: 30px; height: 30px; animation: taskwindow-ring 480ms cubic-bezier(.2,.7,.3,1) forwards; }
-    .ring svg { display: block; }
-    @keyframes taskwindow-ring { from { transform: scale(.3); opacity: 1 } to { transform: scale(1.5); opacity: 0 } }
   `;
 
-  let root = null;
   let cursor = null;
   let glow = null;
   let style = null;
@@ -99,7 +91,7 @@
     host.id = "taskwindow-cursor";
     host.setAttribute("aria-hidden", "true");
     host.style.cssText = "all:initial;position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;z-index:2147483646;";
-    root = host.attachShadow({ mode: "closed" });
+    const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>${SHADOW_CSS}</style><div class="cursor">${CURSOR_SVG}</div>`;
     cursor = root.querySelector(".cursor");
     document.documentElement.appendChild(host);
@@ -109,19 +101,13 @@
     glow.style.opacity = "1";
   }
 
-  // Marks a click where it lands: the arrow dips and a textured ring spreads.
-  function pulse(x, y) {
+  // Marks a click on the cursor itself: the arrow dips. The page shows the
+  // rest: the real pointer is on the element, so its own :hover and :active
+  // styles apply, as they would for a person's click.
+  function press() {
+    if (reduced) return;
     cursor.classList.add("press");
     setTimeout(() => cursor.classList.remove("press"), 110);
-    if (reduced) return;
-    const ring = document.createElement("div");
-    ring.className = "ring";
-    ring.style.left = `${x - 15}px`;
-    ring.style.top = `${y - 15}px`;
-    ring.innerHTML = RING_SVG;
-    root.appendChild(ring);
-    // A timer, not animationend: a throttled background tab may never fire it.
-    setTimeout(() => ring.remove(), 600);
   }
 
   // `step` is set when the move is one point of a path the real pointer is
@@ -141,7 +127,7 @@
     cursor.style.opacity = "1";
     visible = true;
     at = { x, y };
-    if (click) setTimeout(() => pulse(x, y), ms);
+    if (click) setTimeout(press, ms);
     showGlow();
   }
 
@@ -152,9 +138,9 @@
         const step = Number.isFinite(msg.ms) ? Math.min(Math.max(msg.ms, 0), 1000) : undefined;
         moveTo(msg.x, msg.y, msg.click === true, step);
       } else if (msg.op === "press" && typeof msg.x === "number" && typeof msg.y === "number") {
-        // The real button just went down here: ring now, not after a glide.
+        // The real button just went down here: dip now, not after a glide.
         if (!visible) moveTo(msg.x, msg.y, false);
-        pulse(msg.x, msg.y);
+        press();
       } else if (msg.op === "focus") {
         ensure();
         showGlow();

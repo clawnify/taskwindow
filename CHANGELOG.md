@@ -3,6 +3,24 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Changed
+
+**A human click lands a little off-centre, always on the element you meant.**
+It used to press the exact pixel asked for, every time. It now presses a few
+pixels away, never more than 20% of the element's size, 6px across or 3px
+down, and only after checking that the new point still hits the same button,
+link or checkbox. Where the spot itself matters it still presses exactly
+where asked: sliders, canvases, video, embedded frames, and text boxes that
+already hold text, where the click places the caret. The result says where it
+pressed.
+
+**Clicks show on the element, not as a ring.** The ring that spread from each
+click is gone. The pointer is really on the element, so the page's own hover
+and pressed styles show the click, as they would for a person's; the agent's
+arrow still dips briefly on the press.
+
 ## 0.2.10
 
 ### Changed

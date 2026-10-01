@@ -129,7 +129,7 @@ const rawDefs = [
         .boolean()
         .default(true)
         .describe(
-          "Perform the action the way a hand would: a curved, decelerating pointer path with overshoot and a dwell before the press; a scroll split into uneven wheel bursts so every intermediate position fires; per-character key events instead of a bulk insert. Default true; false sends one instant synthetic event."
+          "Perform the action the way a hand would: a curved, decelerating pointer path with overshoot and a dwell before the press, which lands a few pixels off x,y but always on the same element (exactly on x,y where the spot matters: sliders, canvases, text boxes holding text); a scroll split into uneven wheel bursts so every intermediate position fires; per-character key events instead of a bulk insert. Default true; false sends one instant synthetic event."
         ),
       targetWidth: z
         .number()
