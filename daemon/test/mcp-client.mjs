@@ -123,6 +123,11 @@ async function main() {
   check(`all ${expected.length} tools exposed`, expected.length === 20 && expected.every((n) => got.includes(n)), `got: ${got.join(",")}`);
   const computer = tools.find((t) => t.name === "computer");
   check("computer schema has action enum", JSON.stringify(computer.inputSchema).includes("screenshot"));
+  const props = computer.inputSchema.properties;
+  check("coercion keeps the advertised types: human is a boolean defaulting to true, x an integer",
+    props.human?.type === "boolean" && props.human?.default === true && props.x?.type === "integer" &&
+      !(computer.inputSchema.required || []).includes("human") && /Default true/.test(props.human?.description || ""),
+    JSON.stringify({ human: props.human, x: props.x, required: computer.inputSchema.required }));
   const tabsCreate = tools.find((t) => t.name === "tabs_create");
   check("tabs_create schema requires url but not task (the session remembers its task)",
     Array.isArray(tabsCreate.inputSchema.required) && tabsCreate.inputSchema.required.includes("url") && !tabsCreate.inputSchema.required.includes("task"));
@@ -151,6 +156,29 @@ async function main() {
     savedOk = buf.toString("base64") === "aWNvbg==";
   }
   check("computer screenshot save_to_disk writes file and returns path", savedOk, `text: ${savedText}`);
+
+  // Models sometimes send scalars as strings; the unambiguous spellings are
+  // accepted, and human input is the default.
+  const computerText = async (args) => {
+    try {
+      const res = await client.callTool({ name: "computer", arguments: { action: "left_click", x: 10, y: 10, ...args } });
+      return res.isError ? `error: ${res.content?.[0]?.text}` : res.content[0].text;
+    } catch (err) {
+      return `error: ${err.message}`;
+    }
+  };
+  for (const [label, args, want] of [
+    ["human defaults to true", {}, "human=true"],
+    ['human "true" is accepted as true', { human: "true" }, "human=true"],
+    ['human "false" is accepted as false', { human: "false" }, "human=false"],
+    ["human false turns it off", { human: false }, "human=false"],
+    ['numeric strings are accepted for coordinates', { x: "10", y: "20" }, "ok: left_click"],
+  ]) {
+    const text = await computerText(args);
+    check(`computer: ${label}`, text.includes(want), `text: ${text}`);
+  }
+  const notABool = await computerText({ human: "yes" });
+  check("computer: an ambiguous string is still rejected", notABool.startsWith("error:"), `text: ${notABool}`);
 
   const nav = await client.callTool({ name: "navigate", arguments: { url: "https://example.com/other" } });
   check("navigate returns final url/title", !nav.isError && nav.content.at(-1).text.includes("Other"));
@@ -181,6 +209,25 @@ async function main() {
     arguments: { steps: [{ tool: "tabs_list" }, { tool: "computer", params: { action: "left_click", x: 10, y: 10 } }] },
   });
   check("batch runs all steps", !batch.isError && batch.content.at(-1).text.includes("1. tabs_list") && batch.content.at(-1).text.includes("2. computer"));
+
+  const batchHuman = await client.callTool({
+    name: "browser_batch",
+    arguments: { steps: [
+      { tool: "computer", params: { action: "left_click", x: 10, y: 10 } },
+      { tool: "computer", params: { action: "left_click", x: "10", y: 10, human: "false" } },
+    ] },
+  });
+  const batchHumanText = batchHuman.content.at(-1).text;
+  check("batch steps get the same defaults and coercion as direct calls",
+    !batchHuman.isError && /1\. computer:\nok: left_click human=true/.test(batchHumanText) && /2\. computer:\nok: left_click human=false/.test(batchHumanText),
+    `text: ${batchHumanText}`);
+
+  const batchInvalid = await client.callTool({
+    name: "browser_batch",
+    arguments: { steps: [{ tool: "tabs_list" }, { tool: "computer", params: { action: "not_an_action" } }] },
+  });
+  check("batch rejects a step whose params fail its tool's schema, naming the step",
+    batchInvalid.isError === true && /step 2 \(computer\)/.test(batchInvalid.content[0].text), `text: ${batchInvalid.content[0].text}`);
 
   const batchBad = await client.callTool({
     name: "browser_batch",

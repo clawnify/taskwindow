@@ -5,7 +5,23 @@ write these for users. Add the version's section before tagging.
 
 ## Unreleased
 
+### Changed
+
+**`human` input is now the default.** Clicks, scrolls, typing and `mouse_move`
+take the human path unless you pass `human: false`, so lazy-loading lists,
+hover menus and type-ahead inputs work on the first try instead of after an
+agent notices the plain event did nothing. Each action costs a few hundred
+milliseconds more; `human: false` gets the old instant event back.
+
 ### Fixed
+
+**`human: "true"` no longer fails the call.** Some agents send booleans and
+numbers as strings, and the schema rejected the whole call, so the agent went
+looking for a way around the tool. Every boolean and number parameter now
+accepts `"true"`, `"false"` and numeric strings; anything else is still
+rejected. `browser_batch` steps go through the same schema as direct calls, so
+they get the same defaults, and bad parameters fail the step by name instead of
+reaching the extension.
 
 **Agents no longer ask to run an update that does nothing.** When the Chrome
 Web Store shipped an extension newer than the daemon on npm, every agent
