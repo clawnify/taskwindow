@@ -3,6 +3,16 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**Agents no longer ask to run an update that does nothing.** When the Chrome
+Web Store shipped an extension newer than the daemon on npm, every agent
+session asked the user for permission to run `taskwindow update`, which could
+only answer "already up to date". The agent now hears that there is nothing to
+run yet, and is still told to update once npm has the newer daemon.
+
 ## 0.2.9
 
 ### Added
