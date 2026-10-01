@@ -86,6 +86,13 @@ export function updateNotice({ version, latest, extensionVersion, extensionStore
           "Chrome updates it from the Web Store on its own (usually within a day) — no command fixes this, " +
           "though the user can click Update on chrome://extensions."
       );
+    } else if (extensionStore && latest && !isNewer(latest, version)) {
+      // The store shipped a build whose daemon is not on npm yet: `taskwindow
+      // update` would only answer "already up to date".
+      notes.push(
+        `The TaskWindow Chrome extension is ${extensionVersion} while the daemon is ${version}, ` +
+          "and npm had no newer daemon at the last check — nothing to run yet; the matching daemon arrives with the next npm release."
+      );
     } else {
       problems.push(`The TaskWindow Chrome extension is ${extensionVersion} while the daemon is ${version}.`);
     }

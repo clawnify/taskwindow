@@ -39,7 +39,7 @@ const canned = {
   computer: (params) =>
     params?.action === "screenshot"
       ? { image: { data: "aWNvbg==", mimeType: "image/png" }, text: "captured 1280x720 viewport" }
-      : { text: `ok: ${params?.action}` },
+      : { text: `ok: ${params?.action}${params?.human === undefined ? "" : ` human=${params.human}`}` },
   read_page: { text: '- heading "Example Domain" (e1)\n- link "More information" (e2)' },
   find: { text: '- link "More information" (e2)' },
   get_page_text: { text: "Example Domain\nThis domain is for use in illustrative examples." },

@@ -98,14 +98,14 @@ cursor that teleports onto a button never fires the `mouseenter` a hover menu
 opens on. `Input.insertText` fires no key events at all, so a type-ahead search
 box stays empty however right the text looks.
 
-Pass `human: true` to `computer` and the action is performed the way a hand
-does it: the pointer travels a curved, decelerating path with an overshoot and
+By default every `computer` click, scroll, type and `mouse_move` is performed
+the way a hand does it: the pointer travels a curved, decelerating path with an overshoot and
 a dwell before the press, a scroll becomes several uneven wheel gestures, and
 text is typed as real per-character key events. The coordinates and deltas you
 asked for are exact — the variation is in the journey, never the destination.
 
-It costs a few hundred milliseconds per action, so it is off by default: reach
-for it when an action silently does nothing.
+It costs a few hundred milliseconds per action. Pass `human: false` for one
+instant synthetic event when speed matters more than realism.
 
 There is also `action: "idle"`, which drifts the cursor around for a moment
 without clicking anything; give it a `dy` and it also rocks the wheel by that

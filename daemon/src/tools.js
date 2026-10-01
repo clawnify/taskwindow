@@ -101,11 +101,11 @@ const rawDefs = [
       "key (named key press, e.g. Enter, Tab, Escape, ArrowLeft, Backspace), scroll (by dx/dy pixels), " +
       "mouse_move, wait, idle. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
       "read x,y straight off the last screenshot. " +
-      "Pass human:true on a click, scroll, type or mouse_move when the plain synthetic event is not working: it moves the " +
-      "pointer along a real path, scrolls as a real wheel gesture, and types real per-key events. That is what lazy-loading " +
-      "lists, infinite scroll, hover-revealed menus and type-ahead inputs are waiting for — they ignore a single jumbo " +
-      "scroll delta, a teleported cursor and insertText. It costs a few hundred ms per action, so reach for it when an " +
-      "action silently does nothing, not by default. NOTE: while attached, Chrome shows a " +
+      "Clicks, scrolls, typing and mouse_move are human by default: the pointer moves along a real path, scrolls arrive " +
+      "as a real wheel gesture, and text as real per-key events. That is what lazy-loading lists, infinite scroll, " +
+      "hover-revealed menus and type-ahead inputs are waiting for — they ignore a single jumbo scroll delta, a teleported " +
+      "cursor and insertText. It costs a few hundred ms per action; pass human:false for one instant synthetic event when " +
+      "speed matters more than realism. NOTE: while attached, Chrome shows a " +
       '"TaskWindow started debugging this browser" infobar — this is unavoidable with CDP-based control.',
     inputSchema: {
       action: z.enum([
@@ -127,9 +127,9 @@ const rawDefs = [
         ),
       human: z
         .boolean()
-        .optional()
+        .default(true)
         .describe(
-          "Perform the action the way a hand would: a curved, decelerating pointer path with overshoot and a dwell before the press; a scroll split into uneven wheel bursts so every intermediate position fires; per-character key events instead of a bulk insert. Default false."
+          "Perform the action the way a hand would: a curved, decelerating pointer path with overshoot and a dwell before the press; a scroll split into uneven wheel bursts so every intermediate position fires; per-character key events instead of a bulk insert. Default true; false sends one instant synthetic event."
         ),
       targetWidth: z
         .number()
@@ -137,7 +137,7 @@ const rawDefs = [
         .positive()
         .optional()
         .describe(
-          "With human:true, the width in pixels of the thing being clicked. Fitts's Law uses it to pick the approach speed — a wide button is caught first time, a small one is approached carefully. Default 24."
+          "With human on (the default), the width in pixels of the thing being clicked. Fitts's Law uses it to pick the approach speed — a wide button is caught first time, a small one is approached carefully. Default 24."
         ),
       ms: z.number().int().min(0).max(10_000).optional().describe('Milliseconds for the "wait" action (max 10000)'),
       fullPage: z.boolean().optional().describe('For "screenshot": capture the whole scrollable page instead of the viewport'),
@@ -328,9 +328,27 @@ const rawDefs = [
  * a tab opts out with `noSession`; a tool that declares its own sessionToken
  * (tabs_create's has different semantics) keeps it.
  */
-const toolDefs = rawDefs.map((def) =>
-  def.local || def.noSession ? def : { ...def, inputSchema: { sessionToken, ...def.inputSchema } }
-);
+const toolDefs = rawDefs.map((def) => {
+  const shape = def.local || def.noSession ? def.inputSchema : { sessionToken, ...def.inputSchema };
+  return { ...def, inputSchema: Object.fromEntries(Object.entries(shape).map(([key, field]) => [key, acceptStringScalars(field)])) };
+});
+
+/**
+ * Models sometimes send a scalar as a string (`human: "true"`, `x: "120"`), and
+ * a strict schema fails the whole call over it. Every top-level boolean and
+ * number param accepts the unambiguous spellings; anything else still fails.
+ */
+function acceptStringScalars(field) {
+  let base = field;
+  while (base instanceof z.ZodOptional || base instanceof z.ZodDefault) base = base._def.innerType;
+  if (base instanceof z.ZodBoolean) {
+    return z.preprocess((v) => (v === "true" ? true : v === "false" ? false : v), field);
+  }
+  if (base instanceof z.ZodNumber) {
+    return z.preprocess((v) => (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : v), field);
+  }
+  return field;
+}
 
 const toolNames = new Set(toolDefs.filter((tool) => !tool.local).map((tool) => tool.name));
 
@@ -481,7 +499,13 @@ async function runBatch({ steps, sessionToken }, bridge, logger) {
     }
     try {
       const def = toolDefs.find((d) => d.name === tool);
-      const result = await bridge.sendTool(tool, { ...params, sessionToken }, def.timeoutMs);
+      // The same schema a direct call goes through, so a step gets its
+      // defaults and coercion too, and bad params fail here, named.
+      const parsed = z.object(def.inputSchema).safeParse({ ...params, sessionToken });
+      if (!parsed.success) {
+        throw new Error(`invalid params: ${parsed.error.issues.map((e) => `${e.message} at ${e.path.join(".") || "(root)"}`).join("; ")}`);
+      }
+      const result = await bridge.sendTool(tool, parsed.data, def.timeoutMs);
       results.push({ step: i + 1, tool, ok: true, result });
     } catch (err) {
       logger.error(`[mcp] batch step ${i + 1} (${tool}) failed:`, err.message);
