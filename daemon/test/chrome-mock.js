@@ -26,7 +26,8 @@ export function makeChrome() {
   // fileAccess: the per-extension "Allow access to file URLs" toggle, which
   // <all_urls> alone does not grant. framingBlocked: the target answers with
   // X-Frame-Options/CSP that the DNR rules failed to strip.
-  const flags = { raiseOnCreate: false, fileAccess: false, framingBlocked: false };
+  // cdpLatencyMs: time each debugger command takes, as a real round trip does.
+  const flags = { raiseOnCreate: false, fileAccess: false, framingBlocked: false, cdpLatencyMs: 0 };
   // hooks.script(func, args): stands in for the page when a test needs an
   // injected function's answer; return undefined to fall through.
   const hooks = {};
@@ -231,6 +232,7 @@ export function makeChrome() {
         },
         async sendCommand({ tabId }, method, params) {
           cdp.push({ tabId, method, params });
+          if (flags.cdpLatencyMs) await new Promise((r) => setTimeout(r, flags.cdpLatencyMs));
           return {};
         },
         onEvent: { addListener() {}, removeListener() {} },

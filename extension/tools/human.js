@@ -453,14 +453,21 @@ async function wheelTicks(tabId, x, y, dx, dy) {
 }
 
 /** Real keydown/keyup per character, so type-ahead and key handlers actually fire. */
-export async function humanType(tabId, text) {
-  const plan = typePlan(text);
+export async function humanType(tabId, text, { budgetMs = TYPE_BUDGET_MS } = {}) {
+  const plan = typePlan(text, { budgetMs });
   if (plan.mode === "paste") {
     await send(tabId, "Input.insertText", { text });
     return { mode: "paste", keys: 0 };
   }
+  // The plan fits the budget on paper, but every key also spends two CDP round
+  // trips (~60ms measured). Squeeze what is left of the plan into what is left
+  // of the budget, so the overhead comes out of the pauses, not on top of them.
+  const start = Date.now();
+  let planLeft = plan.keys.reduce((a, k) => a + k.delayMs + k.hold, 0);
   for (const k of plan.keys) {
-    await sleep(k.delayMs);
+    const scale = clamp((budgetMs - (Date.now() - start)) / Math.max(planLeft, 1), 0, 1);
+    planLeft -= k.delayMs + k.hold;
+    await sleep(k.delayMs * scale);
     const spec = charKey(k.ch);
     const base = {
       key: spec.key,
@@ -469,7 +476,7 @@ export async function humanType(tabId, text) {
       nativeVirtualKeyCode: spec.vk,
     };
     await send(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...base, text: spec.text });
-    await sleep(k.hold);
+    await sleep(k.hold * scale);
     await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...base });
   }
   return { mode: "keys", keys: plan.keys.length };

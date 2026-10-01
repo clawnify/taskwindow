@@ -414,3 +414,87 @@ test("where the spot itself matters (the page answers null), the click goes exac
   const down = mouse(mock, "mousePressed")[0].params;
   assert.deepEqual([down.x, down.y], [300, 200]);
 });
+
+/* --------------------------------------------------------------- scroll report */
+
+/** The page's answers to pageScroll: "before" returns `chainLength`; each "read" takes the next reading (the last repeats). */
+function scrollPage(mock, chainLength, readings) {
+  const calls = [];
+  mock.hooks.script = (func, args) => {
+    if (func.name !== "pageScroll") return undefined;
+    const phase = args[4];
+    calls.push(phase);
+    if (phase === "before") return chainLength;
+    const i = calls.filter((p) => p === "read").length - 1;
+    return readings[Math.min(i, readings.length - 1)];
+  };
+  return calls;
+}
+
+test("a scroll that moved the full distance reads as before", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  scrollPage(mock, 1, [{ dx: 0, dy: 1200, atEnd: false }]);
+  const res = await computer({ action: "scroll", human: true, dy: 1200, x: 700, y: 500, tabId, sessionToken: token });
+  assert.match(res.text, /^scrolled \(0, 1200\) at \(700, 500\) in \d human bursts?$/);
+});
+
+test("a scroll that hit the end says how far it really went, so the agent scrolls again", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  scrollPage(mock, 1, [{ dx: 0, dy: 187, atEnd: true }]);
+  const res = await computer({ action: "scroll", human: false, dy: 3000, x: 700, y: 500, tabId, sessionToken: token });
+  assert.match(res.text, /^scrolled \(0, 187\) of the \(0, 3000\) asked at \(700, 500\): reached the end/);
+  assert.match(res.text, /scroll again/);
+});
+
+test("the report waits for a still-animating scroll to settle before reading it", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  const calls = scrollPage(mock, 1, [
+    { dx: 0, dy: 300, atEnd: false },
+    { dx: 0, dy: 700, atEnd: false },
+    { dx: 0, dy: 980, atEnd: false },
+    { dx: 0, dy: 1000, atEnd: false },
+  ]);
+  const res = await computer({ action: "scroll", human: false, dy: 1000, x: 700, y: 500, tabId, sessionToken: token });
+  assert.equal(res.text, "scrolled (0, 1000) at (700, 500)", "the mid-animation readings are not the answer");
+  assert.ok(calls.filter((p) => p === "read").length >= 5, "it keeps reading until the position holds still");
+});
+
+test("over a frame the page cannot see into, the scroll reports what was asked, as before", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  const calls = scrollPage(mock, null, [{ dx: 0, dy: 0, atEnd: true }]);
+  const res = await computer({ action: "scroll", human: false, dy: 500, x: 300, y: 300, tabId, sessionToken: token });
+  assert.equal(res.text, "scrolled (0, 500) at (300, 300)");
+  assert.deepEqual(calls, ["before"], "no readings without a chain to read");
+});
+
+/* --------------------------------------------------------------- typing time */
+
+test("per-key round trips come out of the typing pauses, not on top of the budget", async () => {
+  const mock = makeChrome();
+  const { human, token, tabId } = await session(mock);
+  void token;
+  mock.flags.cdpLatencyMs = 10; // two commands per key: ~20ms of overhead each, ~0.8s for 40 keys
+  const text = "the quick brown fox jumps over the lazy";
+  const start = Date.now();
+  const typed = await human.humanType(tabId, text, { budgetMs: 1500 });
+  const took = Date.now() - start;
+  assert.equal(typed.keys, text.length);
+  assert.equal(mock.cdp.filter((c) => c.params?.type === "keyDown").length, text.length, "every character still a real key");
+  assert.ok(took < 1850, `typing should land near its 1.5s budget, took ${took}ms (the old plan took budget + overhead, ~2.3s)`);
+});
+
+/* --------------------------------------------------------------- wording */
+
+test("a one-step move says 'point', not 'points'", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  await computer({ action: "left_click", human: false, x: 482, y: 96, tabId, sessionToken: token });
+  const res = await computer({ action: "left_click", human: true, x: 482, y: 125, tabId, sessionToken: token });
+  assert.match(res.text, /approached over 1 point\)/);
+  const moved = await computer({ action: "mouse_move", human: true, x: 490, y: 130, tabId, sessionToken: token });
+  assert.match(moved.text, /along 1 point$/);
+});
