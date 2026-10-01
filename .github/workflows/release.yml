@@ -1,7 +1,13 @@
 name: release
 
+# A push to main whose version has no tag yet releases it: the version bump is
+# the release decision, and a tag someone forgets to push left the Web Store
+# on 0.2.9 while npm stayed on 0.2.8. The tag is created in this same run,
+# because a tag pushed with GITHUB_TOKEN never starts another workflow.
+# Pushing a v* tag by hand still releases.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -28,21 +34,44 @@ jobs:
 
   release:
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve the version to release
+        id: version
+        run: |
+          daemon=$(jq -r .version daemon/package.json)
+          manifest=$(jq -r .version extension/manifest.json)
+          extension=$(jq -r .version extension/package.json)
+          if [ "$daemon" != "$manifest" ] || [ "$daemon" != "$extension" ]; then
+            echo "::error::version mismatch: daemon/package.json $daemon, extension/manifest.json $manifest, extension/package.json $extension"
+            exit 1
+          fi
+          tag="v$daemon"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $daemon"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = branch ] && git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already released"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
       - name: Package extension (loadable via chrome://extensions)
+        if: steps.version.outputs.skip != 'true'
         run: |
           cd extension
-          zip -qr "../TaskWindow-extension-${GITHUB_REF_NAME}.zip" .
+          zip -qr "../TaskWindow-extension-${TAG}.zip" .
       - name: Package daemon (npx-ready)
+        if: steps.version.outputs.skip != 'true'
         run: |
           cp README.md daemon/README.md
           cp LICENSE daemon/LICENSE
           cd daemon
-          zip -qr "../TaskWindow-daemon-${GITHUB_REF_NAME}.zip" . -x "node_modules/*"
-      - name: Create GitHub release
+          zip -qr "../TaskWindow-daemon-${TAG}.zip" . -x "node_modules/*"
+      - name: Create GitHub release (and the tag, when releasing from main)
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,7 +79,7 @@ jobs:
           # boilerplate. Deliberately not the tag annotation: `git tag -m`
           # strips lines starting with '#', which silently eats markdown
           # headings. A missing section just yields install-only notes.
-          awk -v v="${GITHUB_REF_NAME#v}" '
+          awk -v v="${TAG#v}" '
             $0 ~ "^## +"v"([^0-9.]|$)" { inside = 1; next }
             inside && /^## / { exit }
             inside { print }
@@ -65,12 +94,14 @@ jobs:
 
           See the README for the full guide.
           EOF
-          gh release create "$GITHUB_REF_NAME" \
-            "TaskWindow-extension-${GITHUB_REF_NAME}.zip" \
-            "TaskWindow-daemon-${GITHUB_REF_NAME}.zip" \
-            --title "TaskWindow ${GITHUB_REF_NAME}" \
+          gh release create "$TAG" \
+            "TaskWindow-extension-${TAG}.zip" \
+            "TaskWindow-daemon-${TAG}.zip" \
+            --target "$GITHUB_SHA" \
+            --title "TaskWindow ${TAG}" \
             --notes-file notes.md
       - name: Publish daemon to npm
+        if: steps.version.outputs.skip != 'true'
         working-directory: daemon
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

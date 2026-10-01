@@ -98,3 +98,13 @@ test("a Web Store extension behind the daemon is Chrome's to update, not a comma
   assert.match(ahead, /extension is 0\.2\.4 while the daemon is 0\.2\.3/);
   assert.equal(updateNotice({ version: "0.2.4", latest: "0.2.4", extensionVersion: "0.2.4", extensionStore: true }), null);
 });
+
+test("a Web Store extension ahead of npm is not a command to run", () => {
+  const early = updateNotice({ version: "0.2.8", latest: "0.2.8", extensionVersion: "0.2.9", extensionStore: true });
+  assert.match(early, /extension is 0\.2\.9 while the daemon is 0\.2\.8/);
+  assert.match(early, /npm had no newer daemon at the last check/);
+  assert.doesNotMatch(early, /`taskwindow update`/);
+  // Unknown npm state: still worth a try.
+  const unknown = updateNotice({ version: "0.2.8", latest: null, extensionVersion: "0.2.9", extensionStore: true });
+  assert.match(unknown, /`taskwindow update`/);
+});
