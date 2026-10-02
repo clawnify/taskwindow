@@ -105,7 +105,9 @@ const rawDefs = [
       "as a real wheel gesture, and text as real per-key events. That is what lazy-loading lists, infinite scroll, " +
       "hover-revealed menus and type-ahead inputs are waiting for — they ignore a single jumbo scroll delta, a teleported " +
       "cursor and insertText. It costs a few hundred ms per action; pass human:false for one instant synthetic event when " +
-      "speed matters more than realism. NOTE: while attached, Chrome shows a " +
+      "speed matters more than realism. A native <select> opens a browser menu that clicks and keys cannot drive: " +
+      "set it with form_input. A scroll result reports how far the content actually moved, which on an infinite list " +
+      "can be less than asked. NOTE: while attached, Chrome shows a " +
       '"TaskWindow started debugging this browser" infobar — this is unavoidable with CDP-based control.',
     inputSchema: {
       action: z.enum([

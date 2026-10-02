@@ -3,6 +3,32 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**A scroll says how far the content really moved.** It used to report the
+distance asked, even when the page moved less: an infinite list whose end
+arrived before the next batch loaded, or a scroll area with less room than
+asked. It now reads where the content under the pointer ended up, once it
+stops moving, and says so, for example `scrolled (0, 187) of the (0, 3000)
+asked … reached the end of what scrolls there`, so an agent knows to scroll
+again. Over an embedded frame, which the page cannot see into, it reports the
+distance asked as before.
+
+**Human typing keeps to its time limit.** Typing was planned to finish within
+7 seconds, but each key also spends two round trips to the browser, which the
+plan did not count: 40 characters could take a second longer than meant. The
+pauses between keys now absorb that time instead. Every character is still a
+real key press.
+
+**Native dropdowns: the tool now says to use `form_input`.** Clicking a
+`<select>` opens the browser's own menu, which clicks and keys sent to the page
+cannot drive, so the value never changed. The `computer` tool description now
+points agents to `form_input`, which sets it directly.
+
+**"Approached over 1 points"** now reads "1 point".
+
 ## 0.2.11
 
 ### Changed

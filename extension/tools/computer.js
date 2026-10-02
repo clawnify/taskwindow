@@ -67,6 +67,103 @@ async function devicePixelRatio(tabId) {
   }
 }
 
+/**
+ * Runs in the tab (the extension's isolated world, whose globals persist
+ * between injections and are invisible to the page). "before" records the
+ * scroll chain under (x, y) — the scrollable ancestors a wheel there moves,
+ * innermost first, then the page — and returns its length, or null when the
+ * point is over a frame, whose scrolling this frame cannot see. "read" returns
+ * how far that chain has moved since, and whether every part of it is at its
+ * end in the direction asked. No timers here: a background tab throttles them.
+ */
+export function pageScroll(x, y, dx, dy, phase) {
+  if (phase === "before") {
+    let el = document.elementFromPoint(x, y);
+    while (el?.shadowRoot) {
+      const inner = el.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    if (el && /^(IFRAME|FRAME)$/.test(el.tagName)) return null;
+    const page = document.scrollingElement || document.documentElement;
+    const chain = [];
+    for (let n = el; n; n = n.parentElement || n.getRootNode().host) {
+      if (n === page || n === document.body || n === document.documentElement) continue;
+      const cs = getComputedStyle(n);
+      const canY = dy && /auto|scroll|overlay/.test(cs.overflowY) && n.scrollHeight > n.clientHeight;
+      const canX = dx && /auto|scroll|overlay/.test(cs.overflowX) && n.scrollWidth > n.clientWidth;
+      if (canX || canY) chain.push(n);
+    }
+    chain.push(page);
+    globalThis.__taskwindowScroll = chain.map((n) => ({ ref: new WeakRef(n), left: n.scrollLeft, top: n.scrollTop }));
+    return chain.length;
+  }
+  const chain = globalThis.__taskwindowScroll;
+  if (!chain) return null;
+  let movedX = 0;
+  let movedY = 0;
+  let atEnd = true;
+  for (const c of chain) {
+    const n = c.ref.deref();
+    if (!n) continue;
+    movedX += n.scrollLeft - c.left;
+    movedY += n.scrollTop - c.top;
+    const endY = dy > 0 ? n.scrollTop >= n.scrollHeight - n.clientHeight - 1 : dy < 0 ? n.scrollTop <= 0 : true;
+    const endX = dx > 0 ? n.scrollLeft >= n.scrollWidth - n.clientWidth - 1 : dx < 0 ? n.scrollLeft <= 0 : true;
+    if (!endX || !endY) atEnd = false;
+  }
+  return { dx: Math.round(movedX), dy: Math.round(movedY), atEnd };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function scrollProbe(tabId, args) {
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: pageScroll, args });
+    return res?.result;
+  } catch {
+    return null; // a page we cannot script (chrome://, the store)
+  }
+}
+
+/**
+ * How far the content under (x, y) actually moved, once it stops moving: a
+ * wheel scroll may still be animating when its event returns. Polled from
+ * here, not from the page, so a throttled background tab cannot stall it.
+ * Null when the page cannot say.
+ */
+async function scrolledBy(tabId, args) {
+  const start = Date.now();
+  let last = null;
+  let stableSince = start;
+  for (;;) {
+    const now = await scrollProbe(tabId, [...args, "read"]);
+    if (!now || !Number.isFinite(now.dx) || !Number.isFinite(now.dy)) return last;
+    if (!last || now.dx !== last.dx || now.dy !== last.dy) {
+      last = now;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince >= 150) {
+      return now;
+    }
+    if (Date.now() - start > 1500) return now;
+    await sleep(40);
+  }
+}
+
+/**
+ * The scroll result says what happened, not what was asked: an infinite list
+ * whose end arrives before the next page loads, or a scroll area with less
+ * room than asked, moves less, and the agent should know to scroll again.
+ */
+function scrollReport({ dx, dy, x, y, moved, how }) {
+  const at = `at (${x}, ${y})${how}`;
+  if (!moved || (Math.abs(moved.dx - dx) <= 2 && Math.abs(moved.dy - dy) <= 2)) return `scrolled (${dx}, ${dy}) ${at}`;
+  const why = moved.atEnd
+    ? "reached the end of what scrolls there (a list that loads more may grow: scroll again to continue)"
+    : "the content stopped short of the distance asked";
+  return `scrolled (${moved.dx}, ${moved.dy}) of the (${dx}, ${dy}) asked ${at}: ${why}`;
+}
+
 function readPngDimensions(b64) {
   try {
     // PNG IHDR: width/height are big-endian uint32 at offsets 16 and 20.
@@ -154,7 +251,7 @@ export async function computer(params) {
         if (params.human) {
           const hit = await humanClick(tabId, { x, y, button, buttons: btnBits, clicks, targetWidth: params.targetWidth });
           const off = hit.x !== x || hit.y !== y ? `, pressed at (${hit.x}, ${hit.y}) on the same element` : "";
-          return { text: `${action} at (${x}, ${y}) in tab ${tabId} (human: approached over ${hit.moves} points${off})` };
+          return { text: `${action} at (${x}, ${y}) in tab ${tabId} (human: approached over ${hit.moves} point${hit.moves === 1 ? "" : "s"}${off})` };
         }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         for (let i = 1; i <= clicks; i++) {
@@ -199,20 +296,25 @@ export async function computer(params) {
           x = x ?? Math.floor((vp.clientWidth || 800) / 2);
           y = y ?? Math.floor((vp.clientHeight || 600) / 2);
         }
+        const probe = [x, y, dx, dy];
+        const watched = Number.isFinite(await scrollProbe(tabId, [...probe, "before"]));
+        let how = "";
         if (params.human && Math.hypot(dx, dy) >= SCROLL_FLOOR_PX) {
           const bursts = await humanScroll(tabId, { x, y, dx, dy });
-          return { text: `scrolled (${dx}, ${dy}) at (${x}, ${y}) in ${bursts} human burst${bursts === 1 ? "" : "s"}` };
+          how = ` in ${bursts} human burst${bursts === 1 ? "" : "s"}`;
+        } else {
+          await send(tabId, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: dx, deltaY: dy });
+          noteCursor(tabId, x, y);
         }
-        await send(tabId, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: dx, deltaY: dy });
-        noteCursor(tabId, x, y);
-        return { text: `scrolled (${dx}, ${dy}) at (${x}, ${y})` };
+        const moved = watched ? await scrolledBy(tabId, probe) : null;
+        return { text: scrollReport({ dx, dy, x, y, moved, how }) };
       }
       case "mouse_move": {
         const x = params.x ?? 0;
         const y = params.y ?? 0;
         if (params.human) {
           const moves = await glideTo(tabId, x, y, { targetWidth: params.targetWidth });
-          return { text: `mouse moved to (${x}, ${y}) along ${moves} points` };
+          return { text: `mouse moved to (${x}, ${y}) along ${moves} point${moves === 1 ? "" : "s"}` };
         }
         await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         noteCursor(tabId, x, y);
