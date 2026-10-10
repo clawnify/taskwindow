@@ -3,6 +3,8 @@
  *   taskwindow install --claude   → Claude Code
  *   taskwindow install --codex    → Codex
  *   taskwindow install --cursor   → Cursor
+ *   taskwindow install --opencode → OpenCode
+ *   taskwindow install --openclaw → OpenClaw
  * Registered only when selected in the installer or explicitly requested.
  */
 import { homedir } from "node:os";
@@ -48,7 +50,14 @@ function codexConfigPath(homeDir, codexHome = process.env.CODEX_HOME) {
   return join(codexHome || join(homeDir, ".codex"), "config.toml");
 }
 
-export function inspectAgents({ homeDir = homedir(), codexHome, hasCommand = commandExists } = {}) {
+// OpenClaw's own resolution, minus profiles: OPENCLAW_CONFIG_PATH wins, else
+// openclaw.json in OPENCLAW_STATE_DIR (default ~/.openclaw).
+function openClawConfigPath(homeDir, env = process.env) {
+  if (env.OPENCLAW_CONFIG_PATH?.trim()) return env.OPENCLAW_CONFIG_PATH.trim();
+  return join(env.OPENCLAW_STATE_DIR?.trim() || join(homeDir, ".openclaw"), "openclaw.json");
+}
+
+export function inspectAgents({ homeDir = homedir(), codexHome, hasCommand = commandExists, env = process.env } = {}) {
   const claudePath = join(homeDir, ".claude.json");
   const codexPath = codexConfigPath(homeDir, codexHome);
   const cursorPath = join(homeDir, ".cursor", "mcp.json");
@@ -56,6 +65,8 @@ export function inspectAgents({ homeDir = homedir(), codexHome, hasCommand = com
   const claude = readJson(claudePath);
   const cursor = readJson(cursorPath);
   const openCode = readJson(openCodePath);
+  // OpenClaw writes plain JSON; a hand-edited JSON5 file reads as unconfigured.
+  const openClaw = readJson(openClawConfigPath(homeDir, env));
   let codex = "";
   try {
     codex = readFileSync(codexPath, "utf8");
@@ -84,6 +95,12 @@ export function inspectAgents({ homeDir = homedir(), codexHome, hasCommand = com
       label: "OpenCode",
       detected: hasCommand("opencode") || existsSync(join(homeDir, ".config", "opencode")),
       configured: !!openCode.mcp?.taskwindow,
+    },
+    {
+      id: "openclaw",
+      label: "OpenClaw",
+      detected: hasCommand("openclaw") || existsSync(join(homeDir, ".openclaw")),
+      configured: !!openClaw.mcp?.servers?.taskwindow,
     },
   ];
 }
@@ -192,6 +209,33 @@ export function registerOpenCode({ port, token }) {
   console.log(`[taskwindow] registered in OpenCode (${path})`);
 }
 
+const OPENCLAW_OPTIONS = { timeout: 60_000, stdio: ["pipe", "pipe", "pipe"], encoding: "utf8" };
+
+export function registerOpenClaw({ port, token }, { execFile = execFileSync } = {}) {
+  const url = `http://127.0.0.1:${port}/mcp`;
+  // Without `transport`, OpenClaw falls back to SSE, which this daemon does not serve.
+  const server = { url, transport: "streamable-http", headers: { Authorization: `Bearer ${token}` } };
+  try {
+    // `config patch` writes while a Gateway runs (newer `mcp set` refuses to)
+    // and the Gateway hot-reloads mcp.* changes. stdin keeps the token out of
+    // argv; --replace-path drops fields left over from an older entry.
+    execFile("openclaw", ["config", "patch", "--stdin", "--replace-path", "mcp.servers.taskwindow"], {
+      ...OPENCLAW_OPTIONS,
+      input: JSON.stringify({ mcp: { servers: { taskwindow: server } } }),
+    });
+    const saved = JSON.parse(execFile("openclaw", ["mcp", "show", "taskwindow", "--json"], OPENCLAW_OPTIONS));
+    if (saved.url !== url || saved.transport !== "streamable-http" ||
+        saved.headers?.Authorization !== `Bearer ${token}`) {
+      throw new Error("saved server does not match the requested connection");
+    }
+  } catch (err) {
+    // CLI output can include the saved server, credentials and all.
+    const reason = err.code === "ENOENT" ? "install the OpenClaw CLI and ensure it is on PATH" : "run openclaw mcp doctor taskwindow";
+    throw new Error(`OpenClaw registration failed (${reason})`);
+  }
+  console.log("[taskwindow] registered in OpenClaw (mcp.servers.taskwindow) — the Gateway picks it up without a restart");
+}
+
 export function unregisterAgents({ port }) {
   try {
     execFileSync("claude", ["mcp", "remove", "taskwindow"], { stdio: "ignore" });
@@ -209,5 +253,9 @@ export function unregisterAgents({ port }) {
       writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
       console.log("[taskwindow] removed from Cursor");
     }
+  } catch {}
+  try {
+    execFileSync("openclaw", ["config", "unset", "mcp.servers.taskwindow"], { stdio: "ignore", timeout: 60_000 });
+    console.log("[taskwindow] removed from OpenClaw");
   } catch {}
 }

@@ -6,8 +6,8 @@ import { javascriptExecute } from "./tools/javascript.js";
 import { readConsoleMessages, readNetworkRequests } from "./tools/console-net.js";
 import { gifRecord } from "./tools/gif.js";
 import { shortcutsList, shortcutsExecute } from "./tools/shortcuts.js";
-import { connectWs, isConnected, reloadExtension } from "./tools/connection.js";
-import { daemonReachable } from "./tools/bootstrap.js";
+import { connectWs, isConnected, isIdle, reloadExtension } from "./tools/connection.js";
+import { needsOnboarding } from "./tools/bootstrap.js";
 import { initGroupReaper } from "./tools/tabs.js";
 
 const VERSION = chrome.runtime.getManifest().version;
@@ -44,15 +44,28 @@ async function dispatchTool(tool, params) {
 connectWs({ version: VERSION, dispatchTool });
 initGroupReaper();
 
+// Chrome installs a downloaded update only once this worker unloads, and the
+// daemon connection keeps it alive for good, so on an always-on machine an
+// update would wait for the next Chrome restart. Apply it at the first quiet
+// moment instead; the connection comes back on its own after the reload.
+chrome.runtime.onUpdateAvailable.addListener(() => {
+  const reloadWhenIdle = () => {
+    if (isIdle(10_000)) chrome.runtime.reload();
+    else setTimeout(reloadWhenIdle, 2_000);
+  };
+  reloadWhenIdle();
+});
+
 // First install: if a daemon already answers, the CLI installer is driving
 // and pairing happens silently — open nothing. Otherwise the user found the
 // store listing first and nothing else tells them the extension needs the
 // CLI, so open the setup guide; it turns green on its own once they run it.
+// A policy install opens nothing either (see needsOnboarding).
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason !== "install") return;
   (async () => {
     const { port } = await chrome.storage.local.get("port");
-    if (await daemonReachable(Number(port) || 9377)) return;
+    if (!(await needsOnboarding(Number(port) || 9377))) return;
     chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
   })();
 });

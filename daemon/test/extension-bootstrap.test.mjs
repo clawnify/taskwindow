@@ -101,3 +101,28 @@ test("the first-install check only counts a daemon that answers /health with ok"
     delete globalThis.fetch;
   }
 });
+
+test("only a user's own install with no daemon running opens the setup guide", async () => {
+  const health = [];
+  const run = async (installType, daemonUp) => {
+    globalThis.chrome = { management: { getSelf: async () => ({ installType }) } };
+    globalThis.fetch = async (url) => {
+      health.push(String(url));
+      if (!daemonUp) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    try {
+      const { needsOnboarding } = await import("../../extension/tools/bootstrap.js");
+      return await needsOnboarding(9377);
+    } finally {
+      delete globalThis.chrome;
+      delete globalThis.fetch;
+    }
+  };
+  assert.equal(await run("normal", false), true);
+  assert.equal(await run("normal", true), false);
+  assert.equal(await run("development", false), true);
+  health.length = 0;
+  assert.equal(await run("admin", false), false);
+  assert.deepEqual(health, [], "a policy install decides without waiting on the daemon");
+});

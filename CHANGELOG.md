@@ -5,7 +5,32 @@ write these for users. Add the version's section before tagging.
 
 ## Unreleased
 
+### Added
+
+**OpenClaw.** `taskwindow install --openclaw` registers TaskWindow with
+OpenClaw, and the installer now offers it when OpenClaw is installed. It
+writes through `openclaw config patch`, so a running Gateway picks it up
+without a restart. `taskwindow uninstall` removes it again.
+
 ### Fixed
+
+**Extension updates apply without a Chrome restart.** Chrome downloads an
+update but installs it only once the extension goes idle, and the daemon
+connection never lets it. A browser that stays open (an always-on agent
+machine, or a desktop Chrome that is never quit) kept running the old version
+indefinitely. The extension now applies a downloaded update by itself, once no
+tool call has run for ten seconds, and reconnects a moment later.
+
+**A changed daemon token no longer strands the extension.** If the daemon's
+token changed under it (a reinstall, a rotated token, or a Chrome profile
+restored from a backup), the extension kept retrying the old token forever.
+When the daemon rejects it now, the extension forgets it and pairs again the
+way a fresh install does. A Web Store build does this on its own. An unpacked
+build asks for a code from `taskwindow pair`.
+
+**No setup tab on machines set up by policy.** When an administrator
+force-installs the extension, Chrome can start before the daemon does, and a
+setup guide used to open on that machine. A policy install now never opens it.
 
 **A scroll says how far the content really moved.** It used to report the
 distance asked, even when the page moved less: an infinite list whose end

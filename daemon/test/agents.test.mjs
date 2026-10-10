@@ -8,6 +8,7 @@ import {
   codexConfigHasTaskWindow,
   inspectAgents,
   registerCodex,
+  registerOpenClaw,
 } from "../src/agents.js";
 
 test("Codex detection and configuration are reported independently", () => {
@@ -159,4 +160,80 @@ test("header insertion stays inside the server table with CRLF and comments", ()
   assert.equal(addCodexAuthorization(contents, "token"), contents.replace(
     '# local\r\n', '# local\r\nhttp_headers = { Authorization = "Bearer token" }\r\n'
   ));
+});
+
+test("OpenClaw detection reads the config its state dir points at", () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "taskwindow-agents-"));
+  const stateDir = join(homeDir, "claw-state");
+  try {
+    mkdirSync(stateDir);
+    writeFileSync(
+      join(stateDir, "openclaw.json"),
+      JSON.stringify({ mcp: { servers: { taskwindow: { url: "http://127.0.0.1:9377/mcp" } } } })
+    );
+    const agents = inspectAgents({
+      homeDir,
+      hasCommand: (command) => command === "openclaw",
+      env: { OPENCLAW_STATE_DIR: stateDir },
+    });
+    assert.deepEqual(agents.find((agent) => agent.id === "openclaw"), {
+      id: "openclaw",
+      label: "OpenClaw",
+      detected: true,
+      configured: true,
+    });
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw registration patches over stdin, keeping the token out of argv", () => {
+  const calls = [];
+  const execFile = (command, args, options) => {
+    calls.push({ command, args, input: options.input });
+    if (args[1] === "show") {
+      return JSON.stringify({
+        url: "http://127.0.0.1:9444/mcp",
+        transport: "streamable-http",
+        headers: { Authorization: "Bearer secret-token" },
+      });
+    }
+    return "";
+  };
+  registerOpenClaw({ port: 9444, token: "secret-token" }, { execFile });
+  assert.deepEqual(calls.map(({ command, args }) => [command, ...args]), [
+    ["openclaw", "config", "patch", "--stdin", "--replace-path", "mcp.servers.taskwindow"],
+    ["openclaw", "mcp", "show", "taskwindow", "--json"],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].input), {
+    mcp: { servers: { taskwindow: {
+      url: "http://127.0.0.1:9444/mcp",
+      transport: "streamable-http",
+      headers: { Authorization: "Bearer secret-token" },
+    } } },
+  });
+  assert.doesNotMatch(calls.flatMap(({ args }) => args).join(" "), /secret-token/);
+});
+
+test("an OpenClaw entry that reads back wrong fails without leaking the token", () => {
+  const execFile = (_command, args) => {
+    if (args[1] === "show") {
+      return JSON.stringify({ url: "http://127.0.0.1:9377/mcp", headers: { Authorization: "Bearer secret" } });
+    }
+    return "";
+  };
+  assert.throws(() => registerOpenClaw({ port: 9377, token: "secret" }, { execFile }), (err) => {
+    assert.doesNotMatch(err.message, /secret/);
+    return /OpenClaw registration failed/.test(err.message);
+  });
+});
+
+test("a missing OpenClaw CLI says how to fix it", () => {
+  const execFile = () => {
+    throw Object.assign(new Error("spawn openclaw ENOENT"), { code: "ENOENT" });
+  };
+  assert.throws(
+    () => registerOpenClaw({ port: 9377, token: "secret" }, { execFile }),
+    /install the OpenClaw CLI/
+  );
 });

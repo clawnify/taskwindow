@@ -14,6 +14,8 @@ let backoff = 1000;
 let dispatchTool = null;
 let version = "0.0.0";
 let connected = false;
+let inFlight = 0;
+let lastToolActivity = 0;
 
 function broadcastStatus() {
   chrome.runtime.sendMessage({ type: "taskwindow:status", connected }).catch(() => {});
@@ -34,11 +36,16 @@ async function settings() {
 async function handleToolCall(msg) {
   let result = null;
   let ok = true;
+  inFlight++;
+  lastToolActivity = Date.now();
   try {
     result = await dispatchTool(msg.tool, msg.params);
   } catch (err) {
     ok = false;
     result = { error: err?.message || String(err) };
+  } finally {
+    inFlight--;
+    lastToolActivity = Date.now();
   }
   const payload = { type: "tool_result", id: msg.id, ok };
   if (ok) {
@@ -78,6 +85,14 @@ export function connectWs({ version: v, dispatchTool: dispatch } = {}) {
 
 export function isConnected() {
   return connected;
+}
+
+/**
+ * No tool call running, and none for quietMs. A browser_batch reaches the
+ * extension as separate calls, so a gap between two of them is not idle.
+ */
+export function isIdle(quietMs) {
+  return inFlight === 0 && Date.now() - lastToolActivity >= quietMs;
 }
 
 async function connect() {
@@ -149,10 +164,13 @@ async function connect() {
     if (msg.type === "tool_call") handleToolCall(msg);
   };
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     clearInterval(keepalive);
     if (ws !== socket) return; // superseded: the live socket owns the connection state
     ws = null;
+    // The daemon has a different token (reinstalled, rotated, or a restored
+    // profile): forget ours so the next connect pairs again, as on install.
+    if (event.code === 4401) chrome.storage.local.remove("token").catch(() => {});
     if (connected) {
       connected = false;
       broadcastStatus();
