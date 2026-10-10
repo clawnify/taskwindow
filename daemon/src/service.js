@@ -3,9 +3,9 @@
  * terminal. macOS uses launchd; Linux uses a systemd user unit; anything else
  * gets manual instructions.
  */
-import { homedir, platform } from "node:os";
+import { homedir, platform, userInfo } from "node:os";
 import { join } from "node:path";
-import { chmodSync, writeFileSync, unlinkSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, writeFileSync, unlinkSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 
 const LABEL = "com.clawnify.taskwindow";
@@ -28,6 +28,38 @@ export function removeExtensionBootstrap(home = homedir()) {
 
 function nodePath() {
   return process.execPath;
+}
+
+/**
+ * A systemd user unit runs only while its user manager does, and without
+ * lingering that manager exists only while the user has a login session. On a
+ * headless box the daemon is SIGTERMed seconds after the last ssh/su session
+ * ends and comes back only at the next login. Lingering keeps the manager up
+ * from boot. Returns the environment `systemctl --user` needs to reach it,
+ * which a service or `su` context does not set.
+ */
+function systemdUserEnv() {
+  const { username, uid } = userInfo();
+  if (!existsSync(join("/var/lib/systemd/linger", username))) {
+    try {
+      execFileSync("loginctl", ["enable-linger", username], { stdio: "pipe" });
+    } catch {
+      throw new Error(
+        `without lingering the daemon stops whenever ${username} has no login session. ` +
+          `Run: sudo loginctl enable-linger ${username}, then re-run this command`
+      );
+    }
+  }
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+  // enable-linger starts the user manager asynchronously; wait for its bus.
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(join(runtimeDir, "bus")) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+  }
+  if (!existsSync(join(runtimeDir, "bus"))) {
+    throw new Error(`the systemd user manager for ${username} is not running (no ${runtimeDir}/bus)`);
+  }
+  return { ...process.env, XDG_RUNTIME_DIR: runtimeDir };
 }
 
 export function installService(daemonEntryPath, port) {
@@ -97,7 +129,8 @@ Description=TaskWindow daemon
 
 [Service]
 ExecStart=${nodePath()} ${daemonEntryPath}
-Restart=on-failure
+Restart=always
+RestartSec=2
 StandardOutput=append:${logPath}
 StandardError=append:${logPath}
 
@@ -105,9 +138,13 @@ StandardError=append:${logPath}
 WantedBy=default.target
 `;
     writeFileSync(unitPath, unit);
-    execSync("systemctl --user daemon-reload");
-    execSync("systemctl --user enable --now taskwindow.service");
+    const env = systemdUserEnv();
+    execSync("systemctl --user daemon-reload", { env, stdio: "pipe" });
+    execSync("systemctl --user enable taskwindow.service", { env, stdio: "pipe" });
+    // restart, not start: an update must swap a running daemon onto the new code.
+    execSync("systemctl --user restart taskwindow.service", { env, stdio: "pipe" });
     console.log(`[taskwindow] login service installed (${unitPath})`);
+    console.log(`[taskwindow] daemon starts at boot, restarts on exit, logs to ${logPath}`);
     return;
   }
 

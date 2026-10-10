@@ -3,9 +3,20 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
-## Unreleased
+## 0.2.12
 
 ### Fixed
+
+**On Linux servers the daemon stays up when nobody is logged in.** The
+installer set it up as a systemd user service without lingering, so systemd
+stopped it seconds after the user's last ssh or `su` session ended, and it came
+back only at the next login. An agent on a headless box therefore had
+TaskWindow some of the time and "Not connected" the rest. `taskwindow install`
+now turns lingering on (or stops and prints the `sudo loginctl enable-linger`
+command when it is not allowed to), reaches the user's systemd from a `su` or
+service context, restarts the daemon whenever it exits, and starts it at boot.
+`taskwindow update` on Linux now restarts a running daemon, so it actually
+moves onto the new version.
 
 **A scroll says how far the content really moved.** It used to report the
 distance asked, even when the page moved less: an infinite list whose end
