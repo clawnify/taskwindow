@@ -18,6 +18,18 @@ service context, restarts the daemon whenever it exits, and starts it at boot.
 `taskwindow update` on Linux now restarts a running daemon, so it actually
 moves onto the new version.
 
+**A box whose daemon runs from a system unit is left to it.** Where root has
+installed `/etc/systemd/system/taskwindow.service` (as provisioned agent
+servers do), `taskwindow install` and `taskwindow update` now stop and say to
+update the package as root and restart that unit, instead of starting a second
+daemon that fights it for the port.
+
+**The extension pairs again when the daemon's token changes.** When the daemon
+refused the token Chrome had kept (after a reinstall, or a token rotated on
+purpose), the extension redialled with it forever and stayed "Not connected".
+It now forgets a refused token, so the Web Store build pairs again on its own
+and an unpacked build asks for a new code.
+
 **A scroll says how far the content really moved.** It used to report the
 distance asked, even when the page moved less: an infinite list whose end
 arrived before the next batch loaded, or a scroll area with less room than

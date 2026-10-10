@@ -26,6 +26,23 @@ export function removeExtensionBootstrap(home = homedir()) {
   } catch {}
 }
 
+const SYSTEM_UNIT_DIRS = ["/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"];
+
+/**
+ * A provisioned box (the Clawnify fleet) runs the daemon from a system unit
+ * as root installed it. A user unit next to it would start a second daemon
+ * fighting for the port, and restarting it would never move the real one onto
+ * new code, so install and update leave such a box to its system unit.
+ */
+export function systemUnitPath(dirs = SYSTEM_UNIT_DIRS) {
+  if (platform() !== "linux") return null;
+  return dirs.map((dir) => join(dir, "taskwindow.service")).find((path) => existsSync(path)) || null;
+}
+
+export function systemUnitMessage(path) {
+  return `this daemon is run by the system unit ${path}. Update the package as root, then: sudo systemctl restart taskwindow`;
+}
+
 function nodePath() {
   return process.execPath;
 }
@@ -122,6 +139,8 @@ export function installService(daemonEntryPath, port) {
   }
 
   if (system === "linux") {
+    const managed = systemUnitPath();
+    if (managed) throw new Error(systemUnitMessage(managed));
     const unitPath = join(homedir(), ".config", "systemd", "user", "taskwindow.service");
     mkdirSync(join(homedir(), ".config", "systemd", "user"), { recursive: true });
     const unit = `[Unit]
