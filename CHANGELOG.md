@@ -3,6 +3,28 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Added
+
+**OpenClaw.** `taskwindow install --openclaw` registers TaskWindow with
+OpenClaw, and the installer now offers it when OpenClaw is installed. It
+writes through `openclaw config patch`, so a running Gateway picks it up
+without a restart. `taskwindow uninstall` removes it again.
+
+### Fixed
+
+**Extension updates apply without a Chrome restart.** Chrome downloads an
+update but installs it only once the extension goes idle, and the daemon
+connection never lets it. A browser that stays open (an always-on agent
+machine, or a desktop Chrome that is never quit) kept running the old version
+indefinitely. The extension now applies a downloaded update by itself, once no
+tool call has run for ten seconds, and reconnects a moment later.
+
+**No setup tab on machines set up by policy.** When an administrator
+force-installs the extension, Chrome can start before the daemon does, and a
+setup guide used to open on that machine. A policy install now never opens it.
+
 ## 0.2.12
 
 ### Fixed

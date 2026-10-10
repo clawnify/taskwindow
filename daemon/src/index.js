@@ -32,7 +32,7 @@ import { UpdateChecker, fetchLatestVersion, isNewer, readUpdateState, updateChec
 import { createRequire } from "node:module";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
-import { inspectAgents, registerClaude, registerCodex, registerCursor, registerOpenCode, unregisterAgents } from "./agents.js";
+import { inspectAgents, registerClaude, registerCodex, registerCursor, registerOpenCode, registerOpenClaw, unregisterAgents } from "./agents.js";
 import { clearLine, cursorTo, emitKeypressEvents, moveCursor } from "node:readline";
 
 // `taskwindow install` manages the login service and offers to register the
@@ -47,6 +47,7 @@ const AGENT_CHOICES = [
   ["codex", "Codex", registerCodex],
   ["cursor", "Cursor", registerCursor],
   ["opencode", "OpenCode", registerOpenCode],
+  ["openclaw", "OpenClaw", registerOpenClaw],
 ];
 
 const AGENT_FLAGS = AGENT_CHOICES.map(([id]) => `--${id}`).join("|");

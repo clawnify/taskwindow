@@ -17,6 +17,18 @@ export async function daemonReachable(port = 9377) {
 }
 
 /**
+ * Whether a first install should open the setup guide. Not when a daemon
+ * already answers (the CLI installer is driving), and never for an install
+ * pushed by policy: an administrator set up that machine, and Chrome may start
+ * before its daemon does, so a guide would only be a stray tab on it.
+ */
+export async function needsOnboarding(port = 9377) {
+  const { installType } = await chrome.management.getSelf();
+  if (installType === "admin") return false;
+  return !(await daemonReachable(port));
+}
+
+/**
  * Pair a Web Store install on its own: Chrome stamps this extension's origin
  * on the request, and the daemon returns the token to the store origin
  * without a code. Only tried when this really is the store build, and only

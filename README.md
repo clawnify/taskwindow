@@ -9,8 +9,8 @@ already signed into — without touching the windows you're working in.
 [coding agent] --MCP--> [TaskWindow daemon] --WebSocket--> [Chrome extension] --CDP--> [your tab]
 ```
 
-Works with Claude Code, Cursor, Windsurf, Codex, or any client that speaks
-MCP over HTTP.
+Works with Claude Code, Cursor, Windsurf, Codex, OpenCode, OpenClaw, or any
+client that speaks MCP over HTTP.
 
 ## Setup (5 minutes)
 
@@ -56,7 +56,16 @@ taskwindow install --claude    # add Claude Code without repeating setup
 taskwindow install --codex     # add Codex without repeating setup
 taskwindow install --cursor    # add Cursor without repeating setup
 taskwindow install --opencode  # add OpenCode without repeating setup
+taskwindow install --openclaw  # add OpenClaw without repeating setup
 ```
+
+The OpenClaw option requires the `openclaw` CLI on PATH and saves the server
+as `mcp.servers.taskwindow` in the config that CLI uses (`OPENCLAW_CONFIG_PATH`
+and `OPENCLAW_STATE_DIR` are respected). A running Gateway picks it up without
+a restart. The Gateway has to run on the same machine as Chrome, since the
+daemon only listens on 127.0.0.1. `openclaw mcp doctor` warns that the
+Authorization header holds a literal token. That is expected: OpenClaw headers
+cannot read a file, and the token only opens the local daemon.
 
 The Codex option requires the `codex` CLI on PATH. It configures the shared
 user-level MCP connection; restart Codex after registration to load the tools.
