@@ -164,17 +164,18 @@ async function connect() {
     if (msg.type === "tool_call") handleToolCall(msg);
   };
 
-  socket.onclose = (event) => {
+  socket.onclose = async (event) => {
     clearInterval(keepalive);
     if (ws !== socket) return; // superseded: the live socket owns the connection state
     ws = null;
-    // The daemon has a different token (reinstalled, rotated, or a restored
-    // profile): forget ours so the next connect pairs again, as on install.
-    if (event.code === 4401) chrome.storage.local.remove("token").catch(() => {});
     if (connected) {
       connected = false;
       broadcastStatus();
     }
+    // The daemon has a different token (reinstalled, or rotated on purpose).
+    // Redialling with this one can never work; forgetting it lets the next
+    // attempt pair again, on its own for the store build.
+    if (event?.code === 4401) await chrome.storage.local.remove("token");
     scheduleReconnect();
   };
 
