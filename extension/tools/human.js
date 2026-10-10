@@ -23,6 +23,7 @@
  */
 
 import { send } from "./cdp.js";
+import { usKey } from "./keys.js";
 
 /** Below these, humanising is noise: a hand nudges a wheel and flicks a cursor too. */
 export const MOVE_FLOOR_PX = 48;
@@ -203,9 +204,8 @@ function charKey(ch) {
   if (ch === "\n" || ch === "\r") {
     return { key: "Enter", code: "Enter", vk: 13, text: "\r" };
   }
-  const upper = ch.toUpperCase();
-  const code = /[a-z]/i.test(ch) ? "Key" + upper : /[0-9]/.test(ch) ? "Digit" + ch : ch === " " ? "Space" : "";
-  return { key: ch, code, vk: upper.charCodeAt(0), text: ch };
+  const { code, vk, shift } = usKey(ch);
+  return { key: ch, code, vk, modifiers: shift ? 8 : 0, text: ch };
 }
 
 /**
@@ -217,11 +217,14 @@ function charKey(ch) {
 export function typePlan(text, { budgetMs = TYPE_BUDGET_MS } = {}) {
   if (text.length > PASTE_THRESHOLD) return { mode: "paste" };
 
+  // By code point, so an emoji or other astral character is one key, not two
+  // lone surrogates that each arrive as U+FFFD.
+  const chars = Array.from(text);
   const keys = [];
   let sinceStall = 0;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const prev = text[i - 1];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const prev = chars[i - 1];
     let delay = clamp(Math.exp(gauss(Math.log(105), 0.32)), 45, 320);
     if (prev === "." || prev === "?" || prev === "!") delay += rand(180, 420);
     else if (prev === "," || prev === ";" || prev === ":") delay += rand(70, 180);
@@ -474,6 +477,7 @@ export async function humanType(tabId, text, { budgetMs = TYPE_BUDGET_MS } = {})
       code: spec.code,
       windowsVirtualKeyCode: spec.vk,
       nativeVirtualKeyCode: spec.vk,
+      modifiers: spec.modifiers,
     };
     await send(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...base, text: spec.text });
     await sleep(k.hold * scale);

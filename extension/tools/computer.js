@@ -5,6 +5,7 @@ import {
   humanClick, humanScroll, humanType, humanIdle, glideTo, noteCursor,
   SCROLL_FLOOR_PX, PASTE_THRESHOLD,
 } from "./human.js";
+import { usKey, charOfCode } from "./keys.js";
 
 const KEY_CODES = {
   enter: [13, "Enter"], tab: [9, "Tab"], escape: [27, "Escape"], esc: [27, "Escape"],
@@ -30,7 +31,8 @@ function keySpec(name) {
     else if (m === "shift") modifiers |= 8;
     else throw new Error(`unknown key modifier "${parts[i]}" in "${name}"`);
   }
-  const keyName = parts[parts.length - 1];
+  // A key named by its code ("Period", "KeyA", "Digit3") is that key's character.
+  const keyName = charOfCode(parts[parts.length - 1]) ?? parts[parts.length - 1];
   let vk, code, key = keyName;
   const lower = keyName.toLowerCase();
   if (KEY_CODES[lower] !== undefined || KEY_CODES[keyName] !== undefined) {
@@ -42,9 +44,10 @@ function keySpec(name) {
     code = "F" + n;
     key = code;
   } else if (keyName.length === 1) {
-    const upper = keyName.toUpperCase();
-    vk = upper.charCodeAt(0);
-    code = /[a-z]/i.test(keyName) ? "Key" + upper : /[0-9]/.test(keyName) ? "Digit" + keyName : keyName;
+    const us = usKey(keyName);
+    vk = us.vk;
+    code = us.code || keyName;
+    if (us.shift) modifiers |= 8;
   } else {
     // Unknown named key: send it raw and let the page decide.
     vk = 0;

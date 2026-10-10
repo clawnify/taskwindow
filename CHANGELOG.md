@@ -14,6 +14,15 @@ without a restart. `taskwindow uninstall` removes it again.
 
 ### Fixed
 
+**Human typing no longer drops punctuation or moves the caret.** Typing
+`# $ % & ' ( .` with `human` on (the default) sent them as End, Home, the arrow
+keys and Delete, so they went missing and everything after them landed in the
+wrong place: `user.name@example.com` arrived as `username@examplecom`. Every
+character is now sent as the key that types it on a US keyboard, with Shift
+where it needs one. The `key` action does the same, so `key: "."` is a period,
+and it also accepts key codes such as `Period` or `KeyA`. Emoji, which used to
+arrive as two broken halves, now type as one character.
+
 **Extension updates apply without a Chrome restart.** Chrome downloads an
 update but installs it only once the extension goes idle, and the daemon
 connection never lets it. A browser that stays open (an always-on agent

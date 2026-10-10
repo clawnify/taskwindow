@@ -206,6 +206,73 @@ test("human typing sends real per-character key events, not a bulk insert", asyn
   assert.match(res.text, /real key events/);
 });
 
+test("punctuation is sent as its own key, never as an editing key (#40)", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+
+  await computer({ action: "type", human: true, text: "a.#(A", tabId, sessionToken: token });
+
+  const downs = mock.cdp.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "keyDown");
+  assert.deepEqual(
+    downs.map((k) => [k.params.text, k.params.code, k.params.windowsVirtualKeyCode, k.params.modifiers]),
+    [["a", "KeyA", 65, 0], [".", "Period", 190, 0], ["#", "Digit3", 51, 8], ["(", "Digit9", 57, 8], ["A", "KeyA", 65, 8]]
+  );
+});
+
+test("no printable ASCII character maps to an editing or navigation key", async () => {
+  const { usKey } = await import(pathToFileURL(join(TOOLS, "keys.js")).href);
+  // Backspace, Tab, Enter, Escape, PageUp…ArrowDown, Insert, Delete: keys
+  // Chrome acts on by vk alone, whatever text the event carries.
+  const editing = new Set([8, 9, 13, 27, 33, 34, 35, 36, 37, 38, 39, 40, 45, 46]);
+  for (let c = 32; c <= 126; c++) {
+    const ch = String.fromCharCode(c);
+    const { code, vk } = usKey(ch);
+    assert.ok(code, `${JSON.stringify(ch)} has a physical key`);
+    assert.ok(c === 32 || !editing.has(vk), `${JSON.stringify(ch)} must not be sent as vk ${vk}`);
+  }
+  assert.deepEqual(usKey("é"), { code: "", vk: 0, shift: false }, "off-layout characters ride on text alone");
+});
+
+test('a single-character "key" presses that key, so "." is not Delete', async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+
+  await computer({ action: "key", key: ".", tabId, sessionToken: token });
+
+  const down = mock.cdp.find((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "keyDown");
+  assert.equal(down.params.code, "Period");
+  assert.equal(down.params.windowsVirtualKeyCode, 190);
+  assert.equal(down.params.text, ".");
+});
+
+test('a key named by its code ("Period", "KeyA") presses that key', async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+
+  await computer({ action: "key", key: "Period", tabId, sessionToken: token });
+  await computer({ action: "key", key: "Control+KeyA", tabId, sessionToken: token });
+
+  const downs = mock.cdp.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "keyDown");
+  assert.deepEqual(
+    downs.map((k) => [k.params.key, k.params.code, k.params.windowsVirtualKeyCode, k.params.modifiers]),
+    [[".", "Period", 190, 0], ["a", "KeyA", 65, 2]]
+  );
+});
+
+test("an emoji is typed as one key, not two lone surrogates", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+
+  await computer({ action: "type", human: true, text: "a😀b", tabId, sessionToken: token });
+
+  const downs = mock.cdp.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "keyDown");
+  assert.deepEqual(downs.map((k) => k.params.text), ["a", "😀", "b"]);
+});
+
 test("typing more than a human would type becomes a paste, and says so", async () => {
   const mock = makeChrome();
   const { computer, human, token, tabId } = await session(mock);
