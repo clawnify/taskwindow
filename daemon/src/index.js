@@ -15,6 +15,8 @@ import {
   downloadExtensionZip,
   refreshExtensionFiles,
   removeExtensionBootstrap,
+  systemUnitPath,
+  systemUnitMessage,
 } from "./service.js";
 import { PairingManager } from "./pairing.js";
 import { STORE_EXTENSION_ID, STORE_LISTING_URL, STORE_ORIGIN } from "./store.js";
@@ -367,6 +369,9 @@ async function runUpdate(config, flags) {
   const staged = flags.includes("--stage2");
   const extFlag = flags.indexOf("--extension");
   const zipArg = extFlag !== -1 && flags[extFlag + 1] && !flags[extFlag + 1].startsWith("--") ? flags[extFlag + 1] : null;
+
+  const managed = systemUnitPath();
+  if (managed) throw new Error(systemUnitMessage(managed));
 
   if (!staged) {
     warnIfShadowed();

@@ -3,9 +3,32 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
-## Unreleased
+## 0.2.12
 
 ### Fixed
+
+**On Linux servers the daemon stays up when nobody is logged in.** The
+installer set it up as a systemd user service without lingering, so systemd
+stopped it seconds after the user's last ssh or `su` session ended, and it came
+back only at the next login. An agent on a headless box therefore had
+TaskWindow some of the time and "Not connected" the rest. `taskwindow install`
+now turns lingering on (or stops and prints the `sudo loginctl enable-linger`
+command when it is not allowed to), reaches the user's systemd from a `su` or
+service context, restarts the daemon whenever it exits, and starts it at boot.
+`taskwindow update` on Linux now restarts a running daemon, so it actually
+moves onto the new version.
+
+**A box whose daemon runs from a system unit is left to it.** Where root has
+installed `/etc/systemd/system/taskwindow.service` (as provisioned agent
+servers do), `taskwindow install` and `taskwindow update` now stop and say to
+update the package as root and restart that unit, instead of starting a second
+daemon that fights it for the port.
+
+**The extension pairs again when the daemon's token changes.** When the daemon
+refused the token Chrome had kept (after a reinstall, or a token rotated on
+purpose), the extension redialled with it forever and stayed "Not connected".
+It now forgets a refused token, so the Web Store build pairs again on its own
+and an unpacked build asks for a new code.
 
 **A scroll says how far the content really moved.** It used to report the
 distance asked, even when the page moved less: an infinite list whose end
