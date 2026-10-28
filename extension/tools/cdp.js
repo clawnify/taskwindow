@@ -8,6 +8,8 @@
  */
 
 export const ATTACHED = new Set();
+/** Tabs kept painting by keepRendering; the screencast ends with the attachment. */
+const RENDERING = new Set();
 
 const BUFFER_CAP = 500;
 /** tabId -> { console: [], network: Map(requestId -> entry), networkOrder: [] } */
@@ -28,6 +30,7 @@ export function getBuffers(tabId) {
 
 export function dropTabState(tabId) {
   ATTACHED.delete(tabId);
+  RENDERING.delete(tabId);
   buffers.delete(tabId);
 }
 
@@ -141,6 +144,7 @@ chrome.debugger.onDetach.addListener((source) => {
   const tabId = source?.tabId;
   if (tabId == null) return;
   ATTACHED.delete(tabId);
+  RENDERING.delete(tabId);
   // The tab is no longer being driven: take the cursor/glow indicator down
   // (it otherwise stays up so screenshots can show where the mouse is).
   chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", op: "hide" }).catch(() => {});
@@ -163,6 +167,26 @@ export async function ensureAttached(tabId) {
       await send(tabId, method, params);
     } catch {}
   }
+}
+
+/**
+ * Keep a background tab painting at full rate, as if someone were watching it.
+ * Opt-in (the agent asks for it): it costs what a visible tab costs.
+ *
+ * Focus emulation does not make a background tab render: a page in it paints
+ * ~2 frames a second, and nothing before the debugger first attaches, so a
+ * page that fetches or draws only once seen shows a skeleton, a blank chart or
+ * a stalled animation, and Page.captureScreenshot can hang waiting for a
+ * frame. A running screencast counts as a capture, and Chrome keeps a captured
+ * tab visible and painting across navigations — without activating the tab or
+ * focusing its window (checked in Chrome on openrouter.ai/rankings: 2 fps → 60
+ * fps). The frames are never acked, so Chrome sends one tiny frame and stops.
+ */
+export async function keepRendering(tabId) {
+  await ensureAttached(tabId);
+  if (RENDERING.has(tabId)) return;
+  await send(tabId, "Page.startScreencast", { format: "jpeg", quality: 1, maxWidth: 16, maxHeight: 16 });
+  RENDERING.add(tabId);
 }
 
 export async function send(tabId, method, params) {

@@ -3,6 +3,20 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**Pages that only load while watched now work in the background.** Some
+pages fetch their data or draw their charts only once someone is looking:
+in an agent's background tab they stayed on a skeleton or an empty chart
+(OpenRouter's rankings page, for one) until you clicked onto the tab, and a
+screenshot could time out waiting for a frame. `tabs_create`, `navigate` and
+`reload` take a new `render: true`, which keeps that tab painting as if it
+were being watched. The tab is still never made active and never takes focus.
+It is off by default and agents turn it on when a page looks stuck, since it
+costs what a visible tab costs.
+
 ## 0.2.13
 
 ### Added

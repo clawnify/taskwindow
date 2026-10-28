@@ -142,9 +142,13 @@ in the mouse-dynamics literature, so do not build on it as camouflage.
 - **Your focus is never taken**: nothing the agent does brings a tab or window
   forward on you. Chrome's `tabs.create` makes a new tab active by default and
   `windows.create` focuses the new window by default; TaskWindow always opens
-  tabs in the background (a background tab still renders, so screenshots and
-  page reads work), creates the agent window unfocused, and hands focus back if
-  Chrome raises a window anyway. A background tab also takes mouse, wheel and
+  tabs in the background, creates the agent window unfocused, and hands focus
+  back if Chrome raises a window anyway. Chrome barely paints a background
+  tab, which most pages don't mind; one that fetches or draws only while
+  watched stays on a skeleton or an empty chart. For those the agent passes
+  `render: true` to `tabs_create`, `navigate` or `reload`, and TaskWindow runs
+  a one-frame DevTools screencast on the tab, which Chrome treats as a capture
+  and keeps painting at full rate, without activating the tab. A background tab also takes mouse, wheel and
   keyboard input over the DevTools protocol (checked in Chrome: click, scroll
   and type all land in a tab that is not its window's active tab, and it stays
   that way), so nothing ever brings a tab forward. Clicking a group in the
