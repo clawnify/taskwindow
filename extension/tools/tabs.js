@@ -20,6 +20,9 @@
  * predating this rule (and the legacy namespace) have several; the read paths
  * keep serving all of them.
  */
+
+import { keepRendering } from "./cdp.js";
+
 const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed, longRunning} } }
 const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap long-running groups unused for 30 days
 // A task the agent said would take under an hour is done an hour after its
@@ -692,7 +695,7 @@ async function rememberedTask(token) {
   return normalizeTask(title || current);
 }
 
-export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) {
+export async function tabsCreate({ url, task, longRunning, sessionToken, render } = {}) {
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   // The task names the session's one group, so it is read once and then fixed:
   // once the session has a group, every later tab joins it and a `task` given
@@ -747,15 +750,21 @@ export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) 
     };
   };
 
+  // A replay hands back the tab the first call opened, which this call may
+  // want rendering even though that one didn't.
+  const replay = async (result) => {
+    if (render) await keepRendering(result.data.id).catch(() => {});
+    return withNote(replayed(result));
+  };
   const inFlight = createsInFlight.get(key);
-  if (inFlight) return withNote(replayed(await inFlight));
+  if (inFlight) return replay(await inFlight);
   const done = createsDone.get(key);
   if (done && Date.now() - done.at < RETRY_WINDOW_MS && (await chrome.tabs.get(done.result.data.id).then(() => true, () => false))) {
-    return withNote(replayed(done.result));
+    return replay(done.result);
   }
   createsDone.delete(key);
 
-  const run = openInTaskGroup({ url, taskUsed, token, longRunning: longRunningUsed });
+  const run = openInTaskGroup({ url, taskUsed, token, longRunning: longRunningUsed, render });
   createsInFlight.set(key, run);
   try {
     const result = await run;
@@ -767,7 +776,7 @@ export async function tabsCreate({ url, task, longRunning, sessionToken } = {}) 
   }
 }
 
-async function openInTaskGroup({ url, taskUsed, token, longRunning }) {
+async function openInTaskGroup({ url, taskUsed, token, longRunning, render }) {
   const startedAt = Date.now();
   const separateWindow = await policySeparateWindow();
   const all = await agentGroups();
@@ -817,6 +826,11 @@ async function openInTaskGroup({ url, taskUsed, token, longRunning }) {
   } else {
     tab = await chrome.tabs.create({ url, active: false });
   }
+  // Before the page gets far: one that loads unseen may never fetch what it
+  // only loads once shown. A failure is reported, not thrown: the tab is not
+  // in its group yet, and throwing here would strand it.
+  let renderError = null;
+  if (render) await keepRendering(tab.id).catch((err) => (renderError = err.message));
   const createdAt = Date.now();
 
   // A tab is only ever the agent's inside a task group: outside one it is
@@ -856,6 +870,7 @@ async function openInTaskGroup({ url, taskUsed, token, longRunning }) {
       `opened tab ${tab.id} in the "${taskName}" group${createdNewWindow ? " in a new window" : ""}: ${tab.url || url}` +
       ` — sessionToken ${token}: pass it as "sessionToken" in every subsequent browser tool call` +
       (isLongRunning ? "" : " (short task: this group closes itself after an hour idle)") +
+      (renderError ? `\nnote: could not keep this tab rendering (${renderError}) — it renders like any background tab` : "") +
       (duplicates.length
         ? `\nnote: this group already had ${duplicates.length === 1 ? "tab" : "tabs"} ${duplicates.join(", ")} at this URL — next time use reload or navigate on that tab instead of opening another`
         : ""),
@@ -900,15 +915,17 @@ async function loadOutcome(tabId, settled, verb) {
   };
 }
 
-export async function navigate({ url, tabId, sessionToken } = {}) {
+export async function navigate({ url, tabId, sessionToken, render } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
+  if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
   await chrome.tabs.update(tab.id, { url });
   const settled = await waitForLoad(tab.id);
   return loadOutcome(tab.id, settled, `navigation to ${url}`);
 }
 
-export async function reload({ tabId, sessionToken, bypassCache = false } = {}) {
+export async function reload({ tabId, sessionToken, bypassCache = false, render } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
+  if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
   await chrome.tabs.reload(tab.id, { bypassCache: !!bypassCache });
   const settled = await waitForLoad(tab.id);
   return loadOutcome(tab.id, settled, "reload");

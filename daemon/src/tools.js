@@ -17,6 +17,18 @@ const sessionToken = z
     "Session token returned by tabs_create — pass it in every browser tool call so the call acts only on your session's tabs (sessions are isolated from each other). Every result restates it as a trailing \"session: ...\" line, so the latest one is always at hand."
   );
 
+// Opt-in: it costs what a visible tab costs, so only when the page needs it.
+const render = z
+  .boolean()
+  .optional()
+  .describe(
+    "Keep this tab painting at full rate while it stays in the background, as if someone were watching it. Off by default: a background " +
+      "tab paints barely at all, which most pages don't mind. Some only fetch or draw once seen, so turn this on if you suspect the page " +
+      "needs a viewer: skeleton placeholders or spinners that never resolve, a chart area that stays empty, an animation stuck mid-way, " +
+      "or a screenshot that times out. On a page already showing that, reload with render: true. It stays on for the tab, across " +
+      "navigations. The tab is still never made active and never takes focus."
+  );
+
 // Result contract with the extension: {text?, image?: {data, mimeType}, data?}.
 // The MCP layer turns `image` into an image content block and everything else
 // into text blocks.
@@ -65,6 +77,7 @@ const rawDefs = [
         .string()
         .optional()
         .describe("Your existing session token from an earlier tabs_create, to keep using that session's groups. Omit on your first call — a fresh token is minted and returned."),
+      render,
     },
     timeoutMs: 15_000,
   },
@@ -78,7 +91,7 @@ const rawDefs = [
     name: "navigate",
     description:
       "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title.",
-    inputSchema: { url: z.string().url(), tabId: tabId.optional() },
+    inputSchema: { url: z.string().url(), tabId: tabId.optional(), render },
     timeoutMs: 30_000,
   },
   {
@@ -89,6 +102,7 @@ const rawDefs = [
     inputSchema: {
       tabId: tabId.optional(),
       bypassCache: z.boolean().optional().describe("Skip the HTTP cache, like a hard reload (default false)"),
+      render,
     },
     timeoutMs: 30_000,
   },

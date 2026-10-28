@@ -538,3 +538,25 @@ test("adopting a window takes the anchor with it, so later tasks follow", async 
   assert.equal(mock.tabs.get(b.data.id).windowId, 1, "a new task opens in the adopted window");
   assert.equal(b.data.newWindow, false);
 });
+
+test("render keeps a background tab painting, only when asked, and never by activating it", async () => {
+  const mock = makeChrome();
+  const { tabsCreate } = await loadTabs(mock);
+  // cdp.js is shared by every test's tabs.js instance, and tab ids restart per mock.
+  (await import(pathToFileURL(join(here, "..", "..", "extension", "tools", "cdp.js")).href)).ATTACHED.clear();
+  const rendering = (tabId) =>
+    mock.cdp.some((c) => c.tabId === tabId && c.method === "Page.startScreencast");
+
+  const plain = await tabsCreate({ url: "https://example.com", task: "Rankings", longRunning: false });
+  assert.equal(rendering(plain.data.id), false, "off by default: a background tab costs nothing extra");
+
+  const { data } = await tabsCreate({ url: "https://openrouter.ai/rankings", sessionToken: plain.data.sessionToken, render: true });
+  assert.ok(rendering(data.id), "render: true starts the screencast that keeps a background tab painting");
+  assert.equal(mock.tabs.get(data.id).active, false, "without ever making the tab active");
+  assert.deepEqual(mock.windowFocus, [], "or focusing a window");
+
+  // A retry within the minute replays the first call's tab: render applies to it.
+  const retried = await tabsCreate({ url: "https://example.com", sessionToken: plain.data.sessionToken, render: true });
+  assert.equal(retried.data.id, plain.data.id, "the retry got the first call's tab");
+  assert.ok(rendering(plain.data.id), "and render: true still took effect on it");
+});
