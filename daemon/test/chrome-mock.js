@@ -27,7 +27,8 @@ export function makeChrome() {
   // <all_urls> alone does not grant. framingBlocked: the target answers with
   // X-Frame-Options/CSP that the DNR rules failed to strip.
   // cdpLatencyMs: time each debugger command takes, as a real round trip does.
-  const flags = { raiseOnCreate: false, fileAccess: false, framingBlocked: false, cdpLatencyMs: 0 };
+  // os: what runtime.getPlatformInfo reports ("mac", "linux", ...).
+  const flags = { raiseOnCreate: false, fileAccess: false, framingBlocked: false, cdpLatencyMs: 0, os: "linux" };
   // hooks.script(func, args): stands in for the page when a test needs an
   // injected function's answer; return undefined to fall through.
   const hooks = {};
@@ -61,7 +62,10 @@ export function makeChrome() {
     messages,
     hooks,
     chrome: {
-      runtime: { getURL: (path) => `chrome-extension://test/${path}` },
+      runtime: {
+        getURL: (path) => `chrome-extension://test/${path}`,
+        getPlatformInfo: async () => ({ os: flags.os }),
+      },
       storage: {
         local: {
           async get(keys) {

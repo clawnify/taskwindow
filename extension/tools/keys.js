@@ -57,3 +57,58 @@ export function charOfCode(code) {
 export function usKey(ch) {
   return BY_CHAR.get(ch) ?? { code: "", vk: 0, shift: false };
 }
+
+/**
+ * macOS editing shortcuts, as the commands Chrome runs for them.
+ *
+ * On a Mac the renderer does not act on Cmd+A, Cmd+Z, Cmd+Backspace and the
+ * like: Chrome's Edit menu and the Cocoa key bindings turn them into editing
+ * commands in the browser, for the focused window only. A CDP key event never
+ * reaches the key bindings, and reaches the menu only while its tab's window
+ * is focused, which the agent window never is. So they arrived as bare
+ * keydowns that edited nothing, and "select all, then type" appended (#41).
+ * Input.dispatchKeyEvent takes the commands to run with the key. These are the
+ * macOS bindings (the table Playwright sends too), less the plain, Shift and
+ * Alt keys, which the renderer handles itself.
+ *
+ * Copy, cut and paste are left out on purpose: they would read and overwrite
+ * the user's own clipboard while they work in other windows, and an agent
+ * reads page text and types it without one.
+ */
+const MAC_COMMANDS = {
+  "Meta+KeyA": "selectAll",
+  "Meta+KeyZ": "undo",
+  "Shift+Meta+KeyZ": "redo",
+  "Meta+Backspace": "deleteToBeginningOfLine",
+  "Shift+Meta+Backspace": "deleteToBeginningOfLine",
+  "Meta+ArrowUp": "moveToBeginningOfDocument",
+  "Meta+ArrowDown": "moveToEndOfDocument",
+  "Meta+ArrowLeft": "moveToLeftEndOfLine",
+  "Meta+ArrowRight": "moveToRightEndOfLine",
+  "Shift+Meta+ArrowUp": "moveToBeginningOfDocumentAndModifySelection",
+  "Shift+Meta+ArrowDown": "moveToEndOfDocumentAndModifySelection",
+  "Shift+Meta+ArrowLeft": "moveToLeftEndOfLineAndModifySelection",
+  "Shift+Meta+ArrowRight": "moveToRightEndOfLineAndModifySelection",
+};
+
+// Agents send Ctrl+A for select all whatever the OS. On a Mac that key edits
+// nothing over CDP (its own binding moves to the line start, and only through
+// the Cocoa bindings above), so it gets what the agent meant: Cmd+A's command.
+// The same goes for Ctrl+Z and Ctrl+Shift+Z.
+const CONTROL_AS_META = new Set(["KeyA", "KeyZ"]);
+
+/**
+ * The editing commands a key press runs on macOS, or undefined. `modifiers`
+ * is CDP's bitmask: Alt 1, Control 2, Meta 4, Shift 8.
+ */
+export function macCommands(code, modifiers) {
+  let mods = modifiers;
+  if ((mods & 7) === 2 && CONTROL_AS_META.has(code)) mods = (mods & ~2) | 4;
+  const name = [[8, "Shift"], [2, "Control"], [1, "Alt"], [4, "Meta"]]
+    .filter(([bit]) => mods & bit)
+    .map(([, label]) => label)
+    .concat(code)
+    .join("+");
+  const command = MAC_COMMANDS[name];
+  return command ? [command] : undefined;
+}

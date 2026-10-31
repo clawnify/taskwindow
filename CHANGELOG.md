@@ -17,6 +17,19 @@ were being watched. The tab is still never made active and never takes focus.
 It is off by default and agents turn it on when a page looks stuck, since it
 costs what a visible tab costs.
 
+**Replacing the text in a field works again.** An agent that selected a
+field's text and typed over it got the new text mixed into the old: a date
+field holding `01/07/2026` became `01/07/201/10/2026026`. Two things were
+broken. `double_click` and `triple_click` were sent as middle clicks, so
+they selected nothing (#44). On macOS, `Meta+a` did nothing, because Chrome
+runs Cmd shortcuts from its Edit menu and the agent's window never has focus
+(#41). Double and triple clicks are now left clicks. On macOS, `Meta+a` and
+`Control+a` select all, `Meta+z` and `Control+z` undo, and `Meta+Backspace`
+and `Meta+` arrow keys edit and move as they do in any Mac text field.
+Cmd+C, Cmd+X and Cmd+V are left as they were, so an agent's key presses
+don't read or replace what's on your clipboard while you work in another
+window. `Control+A` no longer sends Shift as well.
+
 ## 0.2.13
 
 ### Added
