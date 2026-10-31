@@ -5,7 +5,13 @@ import {
   humanClick, humanScroll, humanType, humanIdle, glideTo, noteCursor,
   SCROLL_FLOOR_PX, PASTE_THRESHOLD,
 } from "./human.js";
-import { usKey, charOfCode } from "./keys.js";
+import { usKey, charOfCode, macCommands } from "./keys.js";
+
+// Whether Chrome runs on macOS, where editing shortcuts need their commands
+// sent with the key (see macCommands). Asked once per service worker.
+let macOS;
+const onMac = () =>
+  (macOS ??= chrome.runtime.getPlatformInfo().then((p) => p.os === "mac", () => false));
 
 const KEY_CODES = {
   enter: [13, "Enter"], tab: [9, "Tab"], escape: [27, "Escape"], esc: [27, "Escape"],
@@ -47,7 +53,10 @@ function keySpec(name) {
     const us = usKey(keyName);
     vk = us.vk;
     code = us.code || keyName;
-    if (us.shift) modifiers |= 8;
+    // A capital letter beside Control, Alt or Meta names the key, as in
+    // "Control+A" for select all: Shift is added only when typing it.
+    if (/^[A-Z]$/.test(keyName) && modifiers & 7) key = keyName.toLowerCase();
+    else if (us.shift) modifiers |= 8;
   } else {
     // Unknown named key: send it raw and let the page decide.
     vk = 0;
@@ -249,7 +258,9 @@ export async function computer(params) {
       case "triple_click": {
         const x = params.x ?? 0;
         const y = params.y ?? 0;
-        const [button, btnBits] = BUTTONS[action === "left_click" ? "left" : action === "right_click" ? "right" : "middle"];
+        // Double and triple clicks are left clicks: as middle clicks they fired
+        // no click event and selected nothing (#44).
+        const [button, btnBits] = BUTTONS[action === "right_click" ? "right" : action === "middle_click" ? "middle" : "left"];
         const clicks = action === "double_click" ? 2 : action === "triple_click" ? 3 : 1;
         if (params.human) {
           const hit = await humanClick(tabId, { x, y, button, buttons: btnBits, clicks, targetWidth: params.targetWidth });
@@ -285,7 +296,8 @@ export async function computer(params) {
           windowsVirtualKeyCode: spec.windowsVirtualKeyCode, nativeVirtualKeyCode: spec.windowsVirtualKeyCode,
           modifiers: spec.modifiers,
         };
-        await send(tabId, "Input.dispatchKeyEvent", { type: spec.text ? "keyDown" : "rawKeyDown", ...base, text: spec.text });
+        const commands = (await onMac()) ? macCommands(spec.code, spec.modifiers) : undefined;
+        await send(tabId, "Input.dispatchKeyEvent", { type: spec.text ? "keyDown" : "rawKeyDown", ...base, text: spec.text, commands });
         await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...base });
         return { text: `pressed ${params.key}` };
       }

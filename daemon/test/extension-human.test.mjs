@@ -262,6 +262,68 @@ test('a key named by its code ("Period", "KeyA") presses that key', async () => 
   );
 });
 
+test("double and triple clicks are left clicks, so they select the word and the field (#44)", async () => {
+  for (const human of [false, true]) {
+    const mock = makeChrome();
+    const { computer, token, tabId } = await session(mock);
+    for (const [action, clicks] of [["double_click", 2], ["triple_click", 3]]) {
+      mock.cdp.length = 0;
+      await computer({ action, human, x: 300, y: 200, tabId, sessionToken: token });
+      const presses = mouse(mock, "mousePressed");
+      assert.deepEqual(
+        presses.map((p) => [p.params.button, p.params.buttons, p.params.clickCount]),
+        Array.from({ length: clicks }, (_, i) => ["left", 1, i + 1]),
+        `${action} with human: ${human}`
+      );
+      assert.ok(mouse(mock, "mouseReleased").every((r) => r.params.button === "left"));
+    }
+  }
+});
+
+async function keyDowns(os, keys) {
+  const mock = makeChrome();
+  mock.flags.os = os;
+  const { computer, token, tabId } = await session(mock);
+  mock.cdp.length = 0;
+  for (const key of keys) await computer({ action: "key", key, tabId, sessionToken: token });
+  return mock.cdp
+    .filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type !== "keyUp")
+    .map((c) => c.params);
+}
+
+test("on macOS, select all and undo send their editing command with the key (#41)", async () => {
+  const keys = ["Meta+a", "Control+a", "Control+A", "Meta+z", "Control+Shift+z", "Meta+Backspace", "Meta+ArrowLeft"];
+  const downs = await keyDowns("mac", keys);
+  assert.deepEqual(
+    downs.map((d) => [d.code, d.modifiers, d.commands]),
+    [
+      ["KeyA", 4, ["selectAll"]],
+      ["KeyA", 2, ["selectAll"]], // what an agent means by Ctrl+A; the page still sees Control
+      ["KeyA", 2, ["selectAll"]],
+      ["KeyZ", 4, ["undo"]],
+      ["KeyZ", 10, ["redo"]],
+      ["Backspace", 4, ["deleteToBeginningOfLine"]],
+      ["ArrowLeft", 4, ["moveToLeftEndOfLine"]],
+    ]
+  );
+});
+
+test("copy, cut and paste never reach the user's clipboard", async () => {
+  const downs = await keyDowns("mac", ["Meta+c", "Meta+x", "Meta+v", "Control+c", "Control+v"]);
+  assert.equal(downs.length, 5);
+  assert.ok(downs.every((d) => d.commands === undefined), JSON.stringify(downs.map((d) => d.commands)));
+});
+
+test("off macOS no commands are sent: Chrome's own key table does the editing", async () => {
+  const downs = await keyDowns("linux", ["Control+a", "Meta+a", "Control+z"]);
+  assert.ok(downs.every((d) => d.commands === undefined));
+});
+
+test('"Control+A" presses Control and A, not Control+Shift+A', async () => {
+  const [down] = await keyDowns("linux", ["Control+A"]);
+  assert.deepEqual([down.key, down.code, down.modifiers], ["a", "KeyA", 2]);
+});
+
 test("an emoji is typed as one key, not two lone surrogates", async () => {
   const mock = makeChrome();
   const { computer, token, tabId } = await session(mock);
