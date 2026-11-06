@@ -26,7 +26,7 @@ const render = z
       "tab paints barely at all, which most pages don't mind. Some only fetch or draw once seen, so turn this on if you suspect the page " +
       "needs a viewer: skeleton placeholders or spinners that never resolve, a chart area that stays empty, an animation stuck mid-way, " +
       "or a screenshot that times out. On a page already showing that, reload with render: true. It stays on for the tab, across " +
-      "navigations. The tab is still never made active and never takes focus."
+      "navigations. This keeps Chrome's debugging banner visible until the tab closes. The tab is still never made active and never takes focus."
   );
 
 // Result contract with the extension: {text?, image?: {data, mimeType}, data?}.
@@ -122,7 +122,7 @@ const rawDefs = [
       "speed matters more than realism. A native <select> opens a browser menu that clicks and keys cannot drive: " +
       "set it with form_input. A scroll result reports how far the content actually moved, which on an infinite list " +
       "can be less than asked. NOTE: while attached, Chrome shows a " +
-      '"TaskWindow started debugging this browser" infobar — this is unavoidable with CDP-based control.',
+      '"TaskWindow started debugging this browser" infobar. Ordinary tabs disconnect after 10 seconds with no running browser calls; rendering and emulated-viewport tabs stay connected.',
     inputSchema: {
       action: z.enum([
         "screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click",
@@ -274,7 +274,8 @@ const rawDefs = [
     name: "read_console_messages",
     description:
       "Read console output (console.*, errors, warnings) captured from the tab. Capture is CDP-based, so it covers " +
-      "messages emitted while TaskWindow has been driving the tab.",
+      "messages emitted while TaskWindow is attached. Capture pauses after 10 seconds with no running browser calls; " +
+      "previously captured messages are kept. For continuous capture, reload with render:true (keeps Chrome's debugging banner visible).",
     inputSchema: {
       tabId: tabId.optional(),
       pattern: z.string().optional().describe("Only messages matching this regular expression"),
@@ -286,7 +287,9 @@ const rawDefs = [
   {
     name: "read_network_requests",
     description:
-      "Read network requests observed in the tab while TaskWindow was attached: method, URL, status, type and size.",
+      "Read network requests observed in the tab while TaskWindow was attached: method, URL, status, type and size. " +
+      "Capture pauses after 10 seconds with no running browser calls; previously captured requests are kept. " +
+      "Navigate or reload to capture a fresh load; for continuous capture, reload with render:true (keeps Chrome's debugging banner visible).",
     inputSchema: {
       tabId: tabId.optional(),
       pattern: z.string().optional().describe("Only requests whose URL matches this regular expression"),

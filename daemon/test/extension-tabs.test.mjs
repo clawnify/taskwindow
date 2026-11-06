@@ -560,3 +560,39 @@ test("render keeps a background tab painting, only when asked, and never by acti
   assert.equal(retried.data.id, plain.data.id, "the retry got the first call's tab");
   assert.ok(rendering(plain.data.id), "and render: true still took effect on it");
 });
+
+test("navigation and reload resume network capture before loading after an idle detach", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, navigate, reload } = await loadTabs(mock);
+  const cdp = await import("../../extension/tools/cdp.js");
+  for (const id of [...cdp.ATTACHED]) cdp.dropTabState(id);
+  const { data } = await tabsCreate({ url: "https://example.com", task: "Capture", longRunning: false });
+  const args = { tabId: data.id, sessionToken: data.sessionToken };
+  mock.chrome.tabs.onUpdated.addListener = (fn) => queueMicrotask(() => fn(data.id, { status: "complete" }));
+  const update = mock.chrome.tabs.update;
+  const checkCapture = () => {
+    assert.ok(cdp.ATTACHED.has(data.id), "capture is attached before the page starts loading");
+    assert.ok(mock.cdp.some((c) => c.tabId === data.id && c.method === "Network.enable"));
+  };
+  mock.chrome.tabs.update = async (...params) => { checkCapture(); return update(...params); };
+  mock.chrome.tabs.reload = async () => checkCapture();
+  await navigate({ ...args, url: "https://example.com/next" });
+  await cdp.detachIdleDebuggers();
+  assert.equal(cdp.ATTACHED.has(data.id), false);
+  mock.cdp.length = 0;
+  await reload(args);
+  await cdp.detachIdleDebuggers();
+  assert.equal(cdp.ATTACHED.has(data.id), false, "navigation does not retain its attachment indefinitely");
+});
+
+test("a refused debugger attachment does not prevent navigation away from a restricted page", async () => {
+  const mock = makeChrome();
+  const { tabsCreate, navigate } = await loadTabs(mock);
+  const cdp = await import("../../extension/tools/cdp.js");
+  for (const id of [...cdp.ATTACHED]) cdp.dropTabState(id);
+  const { data } = await tabsCreate({ url: "chrome://newtab", task: "Navigate", longRunning: false });
+  mock.chrome.debugger.attach = async () => { throw new Error("Cannot attach to this target"); };
+  mock.chrome.tabs.onUpdated.addListener = (fn) => queueMicrotask(() => fn(data.id, { status: "complete" }));
+  const result = await navigate({ tabId: data.id, sessionToken: data.sessionToken, url: "https://example.com" });
+  assert.equal(result.data.url, "https://example.com");
+});

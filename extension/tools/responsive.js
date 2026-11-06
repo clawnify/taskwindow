@@ -20,7 +20,7 @@
  * Clearing closes the harness tab, the fallback tabs and the DNR rule.
  */
 import { resolveTab, ensureTaskGroup, currentTaskName, normalizeToken } from "./tabs.js";
-import { ensureAttached, send } from "./cdp.js";
+import { ensureAttached, retainDebugger, send } from "./cdp.js";
 
 const SESSION_KEY = "responsiveSession"; // per-agent-session suffix below
 const HARNESS_MARKER = "responsive.html";
@@ -171,6 +171,8 @@ async function emulate(tabId, v) {
     mobile: true,
   });
   await send(tabId, "Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  // Detaching resets the viewport; an open responsive view is ongoing work.
+  retainDebugger(tabId);
 }
 
 export async function setViewport({ viewports, url, tabId, sessionToken } = {}) {

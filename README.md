@@ -162,8 +162,16 @@ in the mouse-dynamics literature, so do not build on it as camouflage.
   folder; manual codes are available with `taskwindow pair`.
 - **Agent actions are visible**: a phantom cursor and glow show where the
   agent is acting; while it does, Chrome shows a
-  *"started debugging this browser"* infobar — an unavoidable Chrome policy
-  for this capability, same as Claude's own extension.
+  *"started debugging this browser"* infobar. Ordinary tabs disconnect after
+  10 seconds with no browser tool calls running, and Chrome dismisses the banner
+  about five seconds later. Tabs stay open and reconnect automatically on use.
+  Tabs with `render: true` and responsive fallback tabs keep their connection
+  while open, since rendering and viewport emulation depend on it; those keep
+  the banner visible.
+- **Debug capture**: collected console messages and network requests survive
+  an idle disconnect, but capture pauses while disconnected. Navigate or reload
+  to capture a fresh page load. For continuous capture between calls, reload
+  with `render: true`; this also keeps Chrome's debugging banner visible.
 
 ## Requirements & limits
 
