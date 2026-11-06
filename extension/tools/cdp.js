@@ -2,14 +2,19 @@
  * Shared low-level chrome.debugger (CDP) helpers plus per-tab console/network
  * capture buffers.
  *
- * Attachment is kept alive once a tab is first driven (that's what powers
- * read_console_messages / read_network_requests); the "started debugging this
- * browser" infobar that Chrome shows while attached is a platform constraint.
+ * Ordinary attachments are released when tool calls go quiet. Tabs that need
+ * ongoing rendering or viewport emulation retain theirs until closed.
  */
 
 export const ATTACHED = new Set();
 /** Tabs kept painting by keepRendering; the screencast ends with the attachment. */
 const RENDERING = new Set();
+const RETAINED = new Set();
+const attaching = new Map();
+const detaching = new Map();
+// Runtime/Log.enable replay cached entries when a tab reconnects. Suppress only
+// copies of entries already captured, while those domains are being enabled.
+const replaying = new Map();
 
 const BUFFER_CAP = 500;
 /** tabId -> { console: [], network: Map(requestId -> entry), networkOrder: [] } */
@@ -31,7 +36,35 @@ export function getBuffers(tabId) {
 export function dropTabState(tabId) {
   ATTACHED.delete(tabId);
   RENDERING.delete(tabId);
+  RETAINED.delete(tabId);
   buffers.delete(tabId);
+}
+
+/** Keep CDP state (rendering or viewport emulation) alive between tool calls. */
+export function retainDebugger(tabId) {
+  RETAINED.add(tabId);
+}
+
+function clearAttachment(tabId) {
+  ATTACHED.delete(tabId);
+  RENDERING.delete(tabId);
+  RETAINED.delete(tabId);
+  chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", op: "hide" }).catch(() => {});
+}
+
+/** Called only with no tools running. Returns true if a failed detach needs retrying. */
+export async function detachIdleDebuggers() {
+  const results = await Promise.allSettled([...ATTACHED].filter((id) => !RETAINED.has(id)).map(async (tabId) => {
+    if (detaching.has(tabId)) return detaching.get(tabId);
+    const pending = chrome.debugger.detach({ tabId }).then(() => clearAttachment(tabId));
+    detaching.set(tabId, pending);
+    try {
+      await pending;
+    } finally {
+      detaching.delete(tabId);
+    }
+  }));
+  return results.some((r) => r.status === "rejected");
 }
 
 function levelOf(consoleType) {
@@ -68,6 +101,20 @@ function argPreview(arg) {
   }
 }
 
+function recordConsole(tabId, b, entry) {
+  const replay = replaying.get(tabId);
+  if (replay) {
+    const key = JSON.stringify(entry);
+    const count = replay.get(key) || 0;
+    if (count) {
+      replay.set(key, count - 1);
+      return;
+    }
+  }
+  b.console.push(entry);
+  if (b.console.length > BUFFER_CAP) b.console.splice(0, b.console.length - BUFFER_CAP);
+}
+
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const tabId = source?.tabId;
   if (tabId == null) return;
@@ -75,35 +122,32 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
   switch (method) {
     case "Runtime.consoleAPICalled": {
-      b.console.push({
+      recordConsole(tabId, b, {
         ts: params.timestamp || Date.now(),
         level: levelOf(params.type),
         text: (params.args || []).map(argPreview).join(" "),
         url: params.stackTrace?.[0]?.url || "",
       });
-      if (b.console.length > BUFFER_CAP) b.console.splice(0, b.console.length - BUFFER_CAP);
       break;
     }
     case "Log.entryAdded": {
       const e = params.entry || {};
-      b.console.push({
+      recordConsole(tabId, b, {
         ts: e.timestamp || Date.now(),
         level: e.level === "warning" ? "warning" : e.level === "error" ? "error" : "log",
         text: e.text || "",
         url: e.url || "",
       });
-      if (b.console.length > BUFFER_CAP) b.console.splice(0, b.console.length - BUFFER_CAP);
       break;
     }
     case "Runtime.exceptionThrown": {
       const details = params.exceptionDetails || {};
-      b.console.push({
+      recordConsole(tabId, b, {
         ts: params.timestamp || Date.now(),
         level: "error",
         text: details.exception?.description || details.text || "Uncaught exception",
         url: details.url || "",
       });
-      if (b.console.length > BUFFER_CAP) b.console.splice(0, b.console.length - BUFFER_CAP);
       break;
     }
     case "Network.requestWillBeSent": {
@@ -143,17 +187,35 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 chrome.debugger.onDetach.addListener((source) => {
   const tabId = source?.tabId;
   if (tabId == null) return;
-  ATTACHED.delete(tabId);
-  RENDERING.delete(tabId);
   // The tab is no longer being driven: take the cursor/glow indicator down
   // (it otherwise stays up so screenshots can show where the mouse is).
-  chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", op: "hide" }).catch(() => {});
+  clearAttachment(tabId);
 });
 
 export async function ensureAttached(tabId) {
+  // A tool can arrive while idle cleanup is detaching this tab. Only this tab
+  // waits; other sessions can continue while Chrome answers the detach.
+  if (detaching.has(tabId)) await detaching.get(tabId).catch(() => {});
+  if (attaching.has(tabId)) return attaching.get(tabId);
   if (ATTACHED.has(tabId)) return;
+  const pending = attachAndEnable(tabId);
+  attaching.set(tabId, pending);
+  try {
+    await pending;
+  } finally {
+    attaching.delete(tabId);
+  }
+}
+
+async function attachAndEnable(tabId) {
   await chrome.debugger.attach({ tabId }, "1.3");
   ATTACHED.add(tabId);
+  const replay = new Map();
+  for (const entry of buf(tabId).console) {
+    const key = JSON.stringify(entry);
+    replay.set(key, (replay.get(key) || 0) + 1);
+  }
+  replaying.set(tabId, replay);
   // Best-effort domain enables: some pages (e.g. Chrome Web Store) restrict
   // parts of this, but input dispatch and screenshots still work.
   for (const [method, params] of [
@@ -167,6 +229,7 @@ export async function ensureAttached(tabId) {
       await send(tabId, method, params);
     } catch {}
   }
+  replaying.delete(tabId);
 }
 
 /**
@@ -187,6 +250,7 @@ export async function keepRendering(tabId) {
   if (RENDERING.has(tabId)) return;
   await send(tabId, "Page.startScreencast", { format: "jpeg", quality: 1, maxWidth: 16, maxHeight: 16 });
   RENDERING.add(tabId);
+  retainDebugger(tabId);
 }
 
 export async function send(tabId, method, params) {

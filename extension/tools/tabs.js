@@ -21,7 +21,7 @@
  * keep serving all of them.
  */
 
-import { keepRendering } from "./cdp.js";
+import { ensureAttached, keepRendering } from "./cdp.js";
 
 const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed, longRunning} } }
 const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap long-running groups unused for 30 days
@@ -917,6 +917,9 @@ async function loadOutcome(tabId, settled, verb) {
 
 export async function navigate({ url, tabId, sessionToken, render } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
+  // Resume capture before loading; a restricted current page must still be
+  // able to navigate away even when Chrome refuses its debugger attachment.
+  await ensureAttached(tab.id).catch(() => {});
   if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
   await chrome.tabs.update(tab.id, { url });
   const settled = await waitForLoad(tab.id);
@@ -925,6 +928,7 @@ export async function navigate({ url, tabId, sessionToken, render } = {}) {
 
 export async function reload({ tabId, sessionToken, bypassCache = false, render } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
+  await ensureAttached(tab.id).catch(() => {});
   if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
   await chrome.tabs.reload(tab.id, { bypassCache: !!bypassCache });
   const settled = await waitForLoad(tab.id);

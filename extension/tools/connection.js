@@ -3,7 +3,7 @@
  * client). Reconnects with backoff; a 1-minute alarm covers service-worker
  * restarts.
  */
-import { ATTACHED, dropTabState } from "./cdp.js";
+import { ATTACHED, dropTabState, detachIdleDebuggers } from "./cdp.js";
 import { dropCursor } from "./human.js";
 import { claimInstallerBootstrap, claimStorePairing } from "./bootstrap.js";
 
@@ -16,6 +16,18 @@ let version = "0.0.0";
 let connected = false;
 let inFlight = 0;
 let lastToolActivity = 0;
+const DEBUGGER_IDLE_MS = 10_000;
+let debuggerIdleTimer;
+
+function scheduleDebuggerCleanup() {
+  clearTimeout(debuggerIdleTimer);
+  if (inFlight) return;
+  debuggerIdleTimer = setTimeout(async () => {
+    if (!isIdle(DEBUGGER_IDLE_MS)) return;
+    const retry = await detachIdleDebuggers();
+    if (retry && isIdle(DEBUGGER_IDLE_MS)) scheduleDebuggerCleanup();
+  }, DEBUGGER_IDLE_MS);
+}
 
 function broadcastStatus() {
   chrome.runtime.sendMessage({ type: "taskwindow:status", connected }).catch(() => {});
@@ -37,6 +49,7 @@ async function handleToolCall(msg) {
   let result = null;
   let ok = true;
   inFlight++;
+  clearTimeout(debuggerIdleTimer);
   lastToolActivity = Date.now();
   try {
     result = await dispatchTool(msg.tool, msg.params);
@@ -46,6 +59,7 @@ async function handleToolCall(msg) {
   } finally {
     inFlight--;
     lastToolActivity = Date.now();
+    scheduleDebuggerCleanup();
   }
   const payload = { type: "tool_result", id: msg.id, ok };
   if (ok) {

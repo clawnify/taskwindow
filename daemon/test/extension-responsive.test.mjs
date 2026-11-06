@@ -90,6 +90,21 @@ test("a viewport that cannot be framed gets one emulated tab, not one per call",
   assert.equal(third.data.results[0].tabId, first.data.results[0].tabId);
 });
 
+test("idle cleanup preserves an open fallback's emulated viewport", async () => {
+  const mock = makeChrome();
+  mock.flags.framingBlocked = true;
+  const { setViewport, token } = await session(mock);
+  const cdp = await import("../../extension/tools/cdp.js");
+  for (const id of [...cdp.ATTACHED]) cdp.dropTabState(id);
+  const view = await setViewport({ viewports: [{ width: 390, height: 844 }], sessionToken: token });
+  const fallbackId = view.data.results[0].tabId;
+  let detached = false;
+  mock.chrome.debugger.detach = async () => { detached = true; };
+  await cdp.detachIdleDebuggers();
+  assert.equal(detached, false, "detaching would reset the viewport while the responsive view is open");
+  assert.ok(cdp.ATTACHED.has(fallbackId));
+});
+
 test("a file:// target without file access skips the doomed frame and names the fix", async () => {
   const mock = makeChrome();
   const { setViewport, token } = await session(mock, "file:///tmp/table-test.html");

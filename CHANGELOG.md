@@ -3,6 +3,18 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.15
+
+### Fixed
+
+**Chrome's debugging banner clears when TaskWindow is idle.** Ordinary tabs
+disconnect after 10 seconds without a browser tool call running, then Chrome
+dismisses its banner after its own short delay. Tabs stay open and reconnect
+on use. Long-running calls, explicitly rendering tabs and responsive fallback
+tabs keep their connections while needed. Collected console and network logs
+are kept; new events are only captured while connected. Navigation and reload
+reconnect before loading so their requests can be captured.
+
 ## 0.2.14
 
 ### Fixed
