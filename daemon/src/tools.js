@@ -29,6 +29,16 @@ const render = z
       "navigations. This keeps Chrome's debugging banner visible until the tab closes. The tab is still never made active and never takes focus."
   );
 
+// A page with unsaved changes holds a navigation behind "Leave site?".
+const onUnsaved = z
+  .enum(["keep", "discard"])
+  .optional()
+  .describe(
+    'What to do if the page has unsaved changes and asks "Leave site?" first. "keep" (default): stay, so nothing is lost; ' +
+      'the call returns "Blocked" and the tab is left as it was. "discard": leave and throw the changes away. ' +
+      "Only discard once you know the changes don't matter (e.g. you saved them, or they were a test)."
+  );
+
 // Result contract with the extension: {text?, image?: {data, mimeType}, data?}.
 // The MCP layer turns `image` into an image content block and everything else
 // into text blocks.
@@ -90,21 +100,38 @@ const rawDefs = [
   {
     name: "navigate",
     description:
-      "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title.",
-    inputSchema: { url: z.string().url(), tabId: tabId.optional(), render },
+      "Navigate a tab to a URL. Waits (up to 10s) for the load event, then returns the tab's URL and title. " +
+      "If the page has unsaved changes it answers \"Blocked\" instead of leaving (see onUnsaved).",
+    inputSchema: { url: z.string().url(), tabId: tabId.optional(), render, onUnsaved },
     timeoutMs: 30_000,
   },
   {
     name: "reload",
     description:
       "Reload a tab in place, like the browser's reload button, and wait (up to 10s) for the load event. " +
-      "Use this — not tabs_create — to refresh a page you already have open.",
+      "Use this — not tabs_create — to refresh a page you already have open. " +
+      "If the page has unsaved changes it answers \"Blocked\" instead of reloading (see onUnsaved).",
     inputSchema: {
       tabId: tabId.optional(),
       bypassCache: z.boolean().optional().describe("Skip the HTTP cache, like a hard reload (default false)"),
       render,
+      onUnsaved,
     },
     timeoutMs: 30_000,
+  },
+  {
+    name: "dialog",
+    description:
+      "Answer the dialog a page is showing: an alert, a confirm, a prompt, or the \"Leave site? Changes you made may not be saved\" " +
+      "confirmation. Chrome draws these outside the page, so screenshots never show them, and the page can do nothing until one is " +
+      "answered. You need this when a tool result says a dialog opened or is blocking the tab (tabs_list marks such tabs too). " +
+      "accept = OK / Leave; dismiss = Cancel / Stay. Dismiss is the safe answer when unsure: it never discards work or confirms an action.",
+    inputSchema: {
+      action: z.enum(["accept", "dismiss"]),
+      promptText: z.string().optional().describe("For a prompt dialog with action accept: the text to answer with"),
+      tabId: tabId.optional(),
+    },
+    timeoutMs: 20_000,
   },
   {
     name: "computer",

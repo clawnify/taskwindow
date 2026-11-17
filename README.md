@@ -92,7 +92,7 @@ taking the daemon connection from each other. For another MCP client, connect to
 | Area | Tools |
 |---|---|
 | Status | `taskwindow_status` (daemon/extension readiness and recovery guidance) |
-| Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate`, `reload` |
+| Tabs | `tabs_list`, `tabs_create`, `tabs_close`, `navigate`, `reload`, `dialog` (answer an alert, confirm, prompt or "Leave site?") |
 | See | `computer` (screenshot + click/type/key/scroll/idle, plus `human` mode), `read_page`, `find`, `get_page_text` |
 | Act | `form_input`, `file_upload`, `upload_image`, `javascript_execute` |
 | Debug | `read_console_messages`, `read_network_requests` |
