@@ -21,7 +21,9 @@
  * keep serving all of them.
  */
 
-import { ensureAttached, keepRendering } from "./cdp.js";
+import {
+  ensureAttached, keepRendering, send, openDialog, forgetDialog, nextDialog, describeDialog, assertNoDialog, dialogOpenedError,
+} from "./cdp.js";
 
 const GROUPS_KEY = "agentGroups"; // { [sessionToken]: { [taskNameLower]: {groupId, lastUsed, longRunning} } }
 const GROUP_TTL_MS = 30 * 24 * 60 * 60 * 1000; // reap long-running groups unused for 30 days
@@ -278,7 +280,19 @@ async function assertAllowedTab(tab, sessionToken) {
   if (!ids.includes(tab.groupId)) throw deniedError(tab.id);
 }
 
-export async function resolveTab(tabId, sessionToken) {
+/**
+ * The tab a tool acts on, checked against the session's access. A tab behind a
+ * page dialog answers nothing, so by default this fails fast naming the dialog
+ * (the one choke point every per-tab tool passes, so no tool can hang on it);
+ * only tools that work on a blocked tab pass { allowDialog: true }.
+ */
+export async function resolveTab(tabId, sessionToken, { allowDialog = false } = {}) {
+  const tab = await findTab(tabId, sessionToken);
+  if (!allowDialog) assertNoDialog(tab.id);
+  return tab;
+}
+
+async function findTab(tabId, sessionToken) {
   const token = normalizeToken(sessionToken);
   if (tabId != null) {
     let tab;
@@ -574,13 +588,16 @@ export async function tabsList({ sessionToken } = {}) {
       active: t.active,
       windowId: t.windowId,
       task: titleFor(t) || undefined,
+      dialog: openDialog(t.id) || undefined,
     })),
     text:
       tabs.length > 0
         ? tabs
             .map((t) => {
               const task = titleFor(t);
-              return `${t.id}. ${t.title || "(untitled)"} — ${t.url || t.pendingUrl || "about:blank"}${t.active ? "  [active]" : ""}${task ? `  [task: ${task}]` : ""}`;
+              const dialog = openDialog(t.id);
+              return `${t.id}. ${t.title || "(untitled)"} — ${t.url || t.pendingUrl || "about:blank"}${t.active ? "  [active]" : ""}${task ? `  [task: ${task}]` : ""}` +
+                (dialog ? `  [blocked by ${describeDialog(dialog)}; answer it with the dialog tool]` : "");
             })
             .join("\n")
         : "no tabs in this session's groups yet — use tabs_create (with a task name) to open one",
@@ -880,7 +897,7 @@ async function openInTaskGroup({ url, taskUsed, token, longRunning, render }) {
 export async function tabsClose({ tabId, sessionToken } = {}) {
   // Via resolveTab, not a bare tabs.get: it is the one place that looks a tab
   // up and checks it, so closing cannot leak which ids exist.
-  const tab = await resolveTab(tabId, sessionToken);
+  const tab = await resolveTab(tabId, sessionToken, { allowDialog: true });
   await chrome.tabs.remove(tab.id);
   return { text: `closed tab ${tab.id}` };
 }
@@ -915,22 +932,89 @@ async function loadOutcome(tabId, settled, verb) {
   };
 }
 
-export async function navigate({ url, tabId, sessionToken, render } = {}) {
+/**
+ * Start a navigation or reload and wait for its load, unless the page opens a
+ * dialog first. A page with unsaved changes asks "Leave site?" before it lets
+ * the tab go; that dialog is drawn outside the page, so without this the load
+ * just times out and the tab sits blocked behind a question nobody sees.
+ * onUnsaved "discard" answers it with Leave; anything else answers Stay, so
+ * work is never thrown away unless the agent asked for that.
+ */
+async function loadUnlessAsked(tabId, start, verb, onUnsaved) {
+  const dialog = nextDialog(tabId);
+  const loaded = (async () => {
+    await start();
+    return { settled: await waitForLoad(tabId) };
+  })();
+  let outcome;
+  try {
+    outcome = await Promise.race([loaded, dialog.promise.then((asked) => ({ asked }))]);
+  } finally {
+    dialog.cancel();
+  }
+  if (!outcome.asked) return loadOutcome(tabId, outcome.settled, verb);
+  loaded.catch(() => {});
+  if (outcome.asked.type !== "beforeunload") throw dialogOpenedError(tabId, outcome.asked);
+  const discard = onUnsaved === "discard";
+  await send(tabId, "Page.handleJavaScriptDialog", { accept: discard });
+  forgetDialog(tabId);
+  if (discard) {
+    const result = await loadOutcome(tabId, await waitForLoad(tabId), verb);
+    result.text += "\n(the page had unsaved changes; discarded them as asked)";
+    return result;
+  }
+  return {
+    data: { tabId, blocked: "unsaved changes" },
+    text:
+      `Blocked: the page in tab ${tabId} has unsaved changes and asked to confirm leaving. Kept them: nothing happened, ` +
+      `the page is as it was (${verb} not done). To discard the changes and go ahead, call this again with onUnsaved: "discard".`,
+  };
+}
+
+export async function navigate({ url, tabId, sessionToken, render, onUnsaved } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
   // Resume capture before loading; a restricted current page must still be
   // able to navigate away even when Chrome refuses its debugger attachment.
   await ensureAttached(tab.id).catch(() => {});
   if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
-  await chrome.tabs.update(tab.id, { url });
-  const settled = await waitForLoad(tab.id);
-  return loadOutcome(tab.id, settled, `navigation to ${url}`);
+  return loadUnlessAsked(tab.id, () => chrome.tabs.update(tab.id, { url }), `navigation to ${url}`, onUnsaved);
 }
 
-export async function reload({ tabId, sessionToken, bypassCache = false, render } = {}) {
+export async function reload({ tabId, sessionToken, bypassCache = false, render, onUnsaved } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
   await ensureAttached(tab.id).catch(() => {});
   if (render) await keepRendering(tab.id); // load it painting, as tabs_create does
-  await chrome.tabs.reload(tab.id, { bypassCache: !!bypassCache });
-  const settled = await waitForLoad(tab.id);
-  return loadOutcome(tab.id, settled, "reload");
+  return loadUnlessAsked(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!bypassCache }), "reload", onUnsaved);
+}
+
+/** Answer the alert, confirm, prompt or "Leave site?" dialog a tab is showing. */
+export async function dialog({ action, promptText, tabId, sessionToken } = {}) {
+  const tab = await resolveTab(tabId, sessionToken, { allowDialog: true });
+  const open = openDialog(tab.id);
+  if (!open) {
+    return {
+      data: { tabId: tab.id, dialog: null },
+      text: `tab ${tab.id} shows no dialog that TaskWindow saw open; nothing to answer`,
+    };
+  }
+  const accept = action === "accept";
+  const answer = { accept };
+  if (accept && open.type === "prompt" && promptText != null) answer.promptText = String(promptText);
+  await send(tab.id, "Page.handleJavaScriptDialog", answer);
+  forgetDialog(tab.id);
+  const what = describeDialog(open);
+  if (open.type === "beforeunload" && accept) {
+    // Leaving lets the navigation the page was holding go ahead.
+    const result = await loadOutcome(tab.id, await waitForLoad(tab.id), "navigation");
+    result.text = `left the page, discarding its unsaved changes; ${result.text}`;
+    return result;
+  }
+  return {
+    data: { tabId: tab.id, dialog: open, accepted: accept },
+    text:
+      open.type === "beforeunload"
+        ? `stayed on the page in tab ${tab.id}: its unsaved changes are kept and the navigation was cancelled`
+        : `${accept ? "accepted" : "dismissed"} ${what} in tab ${tab.id}` +
+          (answer.promptText != null ? ` with the answer ${JSON.stringify(answer.promptText)}` : ""),
+  };
 }

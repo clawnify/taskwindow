@@ -10,6 +10,16 @@ export const ATTACHED = new Set();
 /** Tabs kept painting by keepRendering; the screencast ends with the attachment. */
 const RENDERING = new Set();
 const RETAINED = new Set();
+/**
+ * tabId -> the JavaScript dialog the page is showing ({type, message, url,
+ * defaultPrompt}): alert, confirm, prompt, or the "Leave site? Changes you
+ * made may not be saved" confirmation (type "beforeunload"). Chrome draws it
+ * outside the page, so no screenshot shows it, and until it is answered the
+ * page's renderer is blocked: every command that needs the page hangs.
+ */
+const DIALOGS = new Map();
+/** tabId -> Set of callbacks waiting for the next dialog to open. */
+const dialogWaiters = new Map();
 const attaching = new Map();
 const detaching = new Map();
 // Runtime/Log.enable replay cached entries when a tab reconnects. Suppress only
@@ -37,6 +47,7 @@ export function dropTabState(tabId) {
   ATTACHED.delete(tabId);
   RENDERING.delete(tabId);
   RETAINED.delete(tabId);
+  DIALOGS.delete(tabId);
   buffers.delete(tabId);
 }
 
@@ -49,12 +60,15 @@ function clearAttachment(tabId) {
   ATTACHED.delete(tabId);
   RENDERING.delete(tabId);
   RETAINED.delete(tabId);
+  // Detached, the close event can no longer arrive; a remembered dialog would
+  // then block the tab's tools after the user closed it.
+  DIALOGS.delete(tabId);
   chrome.tabs.sendMessage(tabId, { type: "taskwindow:indicator", op: "hide" }).catch(() => {});
 }
 
 /** Called only with no tools running. Returns true if a failed detach needs retrying. */
 export async function detachIdleDebuggers() {
-  const results = await Promise.allSettled([...ATTACHED].filter((id) => !RETAINED.has(id)).map(async (tabId) => {
+  const results = await Promise.allSettled([...ATTACHED].filter((id) => !RETAINED.has(id) && !DIALOGS.has(id)).map(async (tabId) => {
     if (detaching.has(tabId)) return detaching.get(tabId);
     const pending = chrome.debugger.detach({ tabId }).then(() => clearAttachment(tabId));
     detaching.set(tabId, pending);
@@ -179,10 +193,97 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       if (entry) entry.error = params.errorText;
       break;
     }
+    case "Page.javascriptDialogOpening": {
+      const dialog = {
+        type: params.type || "alert",
+        message: params.message || "",
+        url: params.url || "",
+        defaultPrompt: params.defaultPrompt || "",
+      };
+      DIALOGS.set(tabId, dialog);
+      for (const notify of [...(dialogWaiters.get(tabId) || [])]) notify(dialog);
+      break;
+    }
+    case "Page.javascriptDialogClosed":
+      DIALOGS.delete(tabId);
+      break;
     default:
       break;
   }
 });
+
+/** The dialog the tab is showing, or null. */
+export function openDialog(tabId) {
+  return DIALOGS.get(tabId) || null;
+}
+
+/** Forget a dialog once it was answered (the close event follows, but a caller may act first). */
+export function forgetDialog(tabId) {
+  DIALOGS.delete(tabId);
+}
+
+/** Resolves with the next dialog the tab opens; cancel() stops listening. */
+export function nextDialog(tabId) {
+  let notify;
+  const promise = new Promise((resolve) => {
+    notify = resolve;
+  });
+  let set = dialogWaiters.get(tabId);
+  if (!set) dialogWaiters.set(tabId, (set = new Set()));
+  set.add(notify);
+  const cancel = () => {
+    set.delete(notify);
+    if (!set.size && dialogWaiters.get(tabId) === set) dialogWaiters.delete(tabId);
+  };
+  promise.then(cancel);
+  return { promise, cancel };
+}
+
+/** One phrase naming a dialog, e.g. `a confirm dialog: "Delete this?"`. */
+export function describeDialog(dialog) {
+  const message = dialog.message ? `: ${JSON.stringify(dialog.message)}` : "";
+  switch (dialog.type) {
+    case "beforeunload":
+      return 'the "Leave site? Changes you made may not be saved" confirmation (the page has unsaved changes)';
+    case "confirm": return `a confirm dialog${message}`;
+    case "prompt":
+      return `a prompt${message}${dialog.defaultPrompt ? ` (default answer ${JSON.stringify(dialog.defaultPrompt)})` : ""}`;
+    default: return `an alert${message}`;
+  }
+}
+
+function howToAnswer(dialog) {
+  if (dialog.type === "beforeunload") {
+    return 'Answer it with the dialog tool: action "dismiss" stays on the page and keeps the changes, "accept" leaves and discards them.';
+  }
+  if (dialog.type === "alert") return 'Close it with the dialog tool (action "accept").';
+  return (
+    'Answer it with the dialog tool: action "accept" (OK) or "dismiss" (Cancel)' +
+    (dialog.type === "prompt" ? ', with promptText as the answer to type.' : ".")
+  );
+}
+
+/** Error for a call made while a dialog is already open on the tab. */
+export function dialogBlockedError(tabId, dialog) {
+  return new Error(
+    `tab ${tabId} is showing ${describeDialog(dialog)}. Until it is answered the page can do nothing else, ` +
+      `and screenshots do not show it. ${howToAnswer(dialog)}`
+  );
+}
+
+/** Error for a call during which the page opened a dialog (which is still open). */
+export function dialogOpenedError(tabId, dialog) {
+  return new Error(
+    `this made the page in tab ${tabId} open ${describeDialog(dialog)}. It is still open and blocks the page ` +
+      `until it is answered; screenshots do not show it. ${howToAnswer(dialog)}`
+  );
+}
+
+/** Fail fast instead of hanging on a page that a dialog is blocking. */
+export function assertNoDialog(tabId) {
+  const dialog = DIALOGS.get(tabId);
+  if (dialog) throw dialogBlockedError(tabId, dialog);
+}
 
 chrome.debugger.onDetach.addListener((source) => {
   const tabId = source?.tabId;
@@ -253,8 +354,28 @@ export async function keepRendering(tabId) {
   retainDebugger(tabId);
 }
 
+/**
+ * One CDP command. A page showing a dialog answers nothing until it is closed,
+ * so a call into it fails at once instead of hanging, and a command that makes
+ * the page open one (a click on a "Delete" button, javascript_execute calling
+ * confirm()) returns as soon as it opens rather than when someone answers it.
+ */
 export async function send(tabId, method, params) {
-  return chrome.debugger.sendCommand({ tabId }, method, params);
+  if (method === "Page.handleJavaScriptDialog") return chrome.debugger.sendCommand({ tabId }, method, params);
+  assertNoDialog(tabId);
+  const command = chrome.debugger.sendCommand({ tabId }, method, params);
+  const opened = nextDialog(tabId);
+  command.catch(() => {}); // still settles after a dialog wins the race; nobody awaits it then
+  try {
+    return await Promise.race([
+      command,
+      opened.promise.then((dialog) => {
+        throw dialogOpenedError(tabId, dialog);
+      }),
+    ]);
+  } finally {
+    opened.cancel();
+  }
 }
 
 export async function withDebugger(tabId, fn) {

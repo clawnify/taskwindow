@@ -3,6 +3,21 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Fixed
+
+**Page dialogs no longer block the browser unseen.** A page with unsaved
+changes asks "Leave site?" before a reload or navigation, and Chrome draws that
+question outside the page, so screenshots never showed it: `reload` reported a
+slow load while the tab sat blocked, and every later call on the tab hung until
+someone closed the dialog by hand. Now `reload` and `navigate` answer
+"Blocked" and keep the changes; pass `onUnsaved: "discard"` to leave anyway.
+An alert, confirm or prompt that a click, key or script opens is reported the
+moment it opens, calls on a tab behind a dialog fail at once and say which
+dialog it is, `tabs_list` marks such tabs, and a new `dialog` tool accepts or
+dismisses it.
+
 ## 0.2.15
 
 ### Fixed
