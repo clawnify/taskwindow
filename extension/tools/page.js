@@ -24,6 +24,12 @@ async function pageOp(tabId, op, params) {
   return response;
 }
 
+/** An element's click point, from a ref (read_page/find) or a selector: { x, y, width, target }. */
+export async function locateElement(tabId, { ref, selector }) {
+  const { x, y, width, target } = await pageOp(tabId, "locate", { ref, selector });
+  return { x, y, width, target };
+}
+
 export async function readPage({ tabId, sessionToken } = {}) {
   const tab = await resolveTab(tabId, sessionToken);
   const res = await pageOp(tab.id, "read_page", {});

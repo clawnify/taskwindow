@@ -5,6 +5,16 @@ write these for users. Add the version's section before tagging.
 
 ## Unreleased
 
+### Added
+
+**Click an element by its ref.** `computer`'s clicks and `mouse_move` take the
+`ref` that `read_page` and `find` give each element (or a CSS `selector`) in
+place of x,y. TaskWindow scrolls the element into view and clicks its centre,
+the human way by default. When something else covers that point, such as a
+cookie banner, a modal or a sticky header, the click is refused and names what
+covers it, so the overlay is never clicked in the element's place. Until now an
+agent that had read the page still needed a screenshot to press a button.
+
 ### Fixed
 
 **Page dialogs no longer block the browser unseen.** A page with unsaved

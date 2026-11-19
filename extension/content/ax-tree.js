@@ -187,6 +187,33 @@
     return null;
   }
 
+  /**
+   * Where to click an element named by ref or selector: its centre in viewport
+   * CSS pixels, the coordinates CDP input takes (top frame only, as every op
+   * here). Scrolled into view first. Refused when something else is on top of
+   * that point (a cookie banner, a modal, a sticky header), so the click never
+   * lands on the overlay in the element's place.
+   */
+  function locate({ ref, selector }) {
+    const el = resolveTarget({ ref, selector });
+    if (!el) throw new Error("a click on an element needs its ref (from read_page/find) or a selector");
+    let r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) throw new Error("that element has no size on the page now: run read_page again");
+    const inView = r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth;
+    if (!inView) {
+      el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+      r = el.getBoundingClientRect();
+    }
+    const x = Math.round(r.left + r.width / 2);
+    const y = Math.round(r.top + r.height / 2);
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error("that element could not be scrolled into view");
+    const hit = document.elementFromPoint(x, y);
+    if (hit && hit !== el && !el.contains(hit)) {
+      throw new Error(`something else is on top of that element (${describe(hit)}): close it first, or take a screenshot`);
+    }
+    return { x, y, width: Math.round(r.width), target: describe(el) };
+  }
+
   function nativeValue(el, value) {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
@@ -324,6 +351,10 @@
               .slice(0, 50)
               .map((n) => `${"  ".repeat(n.depth)}- ${n.text}`);
             sendResponse({ ok: true, matches, refCount: refMap.size });
+            break;
+          }
+          case "locate": {
+            sendResponse({ ok: true, ...locate(msg.params || {}) });
             break;
           }
           case "get_page_text": {

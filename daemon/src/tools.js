@@ -138,7 +138,8 @@ const rawDefs = [
     description:
       "Screenshot and low-level mouse/keyboard control of a tab via the Chrome DevTools Protocol. " +
       "Actions: screenshot (PNG of the viewport, or full page with fullPage), left_click / right_click / " +
-      "middle_click / double_click / triple_click (at x,y), type (text into the focused element), " +
+      "middle_click / double_click / triple_click (at x,y, or on an element: pass its ref from read_page/find instead), " +
+      "type (text into the focused element), " +
       "key (named key press, e.g. Enter, Tab, Escape, ArrowLeft, Backspace), scroll (by dx/dy pixels), " +
       "mouse_move, wait, idle. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
       "read x,y straight off the last screenshot. " +
@@ -158,6 +159,13 @@ const rawDefs = [
       tabId: tabId.optional(),
       x: z.number().int().optional().describe("X coordinate in viewport pixels (clicks, scroll origin, mouse_move)"),
       y: z.number().int().optional().describe("Y coordinate in viewport pixels"),
+      ref: z
+        .string()
+        .optional()
+        .describe(
+          "For clicks and mouse_move: the element's ref from read_page/find (e.g. e42), in place of x,y. Clicks its centre, scrolling it into view; refused when something covers it."
+        ),
+      selector: z.string().optional().describe("For clicks and mouse_move: a CSS selector, as a fallback when no ref is available"),
       text: z.string().optional().describe('Text for the "type" action'),
       key: z.string().optional().describe('Key name for the "key" action, e.g. "Enter", "a", "ArrowDown"'),
       dx: z.number().int().optional().describe("Horizontal scroll delta in pixels"),
@@ -215,7 +223,7 @@ const rawDefs = [
     name: "read_page",
     description:
       "Structured accessibility-style snapshot of the page: a text tree of interactive elements and content, " +
-      "each labelled with a ref (e.g. e42) you can pass to form_input / file_upload. Cheaper and more reliable " +
+      "each labelled with a ref (e.g. e42) you can pass to computer clicks, form_input and file_upload. Cheaper and more reliable " +
       "than a screenshot for forms and navigation.",
     inputSchema: { tabId: tabId.optional() },
     timeoutMs: 20_000,
