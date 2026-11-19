@@ -1,5 +1,5 @@
 import { resolveTab } from "./tabs.js";
-import { indicator } from "./page.js";
+import { indicator, locateElement } from "./page.js";
 import { withDebugger, send } from "./cdp.js";
 import {
   humanClick, humanScroll, humanType, humanIdle, glideTo, noteCursor,
@@ -189,7 +189,27 @@ function readPngDimensions(b64) {
   }
 }
 
+/** Actions that can take an element (ref or selector) in place of x,y. */
+const ON_ELEMENT = new Set(["left_click", "right_click", "middle_click", "double_click", "triple_click", "mouse_move"]);
+
+/**
+ * A click on an element by its ref from read_page / find: the page says where
+ * the element's centre is (scrolling it into view, refusing when something
+ * covers it), and the click runs there as any x,y click does. Without it an
+ * agent that had read the page still needed a screenshot to press a button.
+ */
 export async function computer(params) {
+  if (ON_ELEMENT.has(params.action) && (params.ref || params.selector)) {
+    const target = await resolveTab(params.tabId, params.sessionToken);
+    const at = await locateElement(target.id, { ref: params.ref, selector: params.selector });
+    const result = await computer({ ...params, ref: undefined, selector: undefined, x: at.x, y: at.y, targetWidth: params.targetWidth ?? at.width });
+    return { ...result, text: `${result.text}, on ${at.target}` };
+  }
+  // A click with no target used to land at (0, 0), the page's top-left corner:
+  // what an older daemon sends when it drops a ref it does not know.
+  if (ON_ELEMENT.has(params.action) && (!Number.isFinite(params.x) || !Number.isFinite(params.y))) {
+    throw new Error(`computer "${params.action}" needs x and y, or the element's ref from read_page/find`);
+  }
   const { action } = params;
   const tab = await resolveTab(params.tabId, params.sessionToken);
 

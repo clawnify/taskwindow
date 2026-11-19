@@ -3,7 +3,22 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
-## Unreleased
+## 0.2.16
+
+### Added
+
+**Click an element by its ref.** `computer`'s clicks and `mouse_move` take the
+`ref` that `read_page` and `find` give each element (or a CSS `selector`) in
+place of x,y. TaskWindow scrolls the element into view and clicks its centre,
+the human way by default. When something else covers that point, such as a
+cookie banner, a modal or a sticky header, the click is refused and names what
+covers it, so the overlay is never clicked in the element's place. Until now an
+agent that had read the page still needed a screenshot to press a button.
+
+A daemon from this release refuses a click by ref while Chrome still runs an
+older extension (which would have clicked the page's top-left corner), and says
+to click by x,y until the Web Store update arrives. A click with neither x,y
+nor a ref is now refused too.
 
 ### Fixed
 

@@ -154,6 +154,8 @@ export function makeChrome() {
         onUpdated: { addListener() {}, removeListener() {} },
         async sendMessage(tabId, msg) {
           messages.push({ tabId, msg });
+          // hooks.message(tabId, msg): stands in for the page's content script.
+          if (hooks.message) return hooks.message(tabId, msg);
         },
       },
       windows: {
