@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { makeChrome } from "./chrome-mock.js";
+import { clickByRefRefusal, CLICK_BY_REF_SINCE } from "../src/tools.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TOOLS = join(here, "..", "..", "extension", "tools");
@@ -68,4 +69,22 @@ test("a ref on an action that takes no element is ignored, not located", async (
   const { computer, token, tabId } = await session(mock);
   await computer({ action: "type", text: "hi", ref: "e3", human: false, tabId, sessionToken: token });
   assert.equal(locates(mock).length, 0);
+});
+
+test("a click with neither x,y nor a ref is refused, never sent to the page's corner", async () => {
+  const mock = makeChrome();
+  const { computer, token, tabId } = await session(mock);
+  await assert.rejects(computer({ action: "left_click", human: false, tabId, sessionToken: token }), /needs x and y, or the element's ref/);
+  assert.equal(pressed(mock).length, 0);
+});
+
+test("the daemon refuses a click by ref to an extension older than the first that clicks by ref", () => {
+  const byRef = { action: "left_click", ref: "e12" };
+  assert.match(clickByRefRefusal("computer", byRef, "0.2.15"), /clicks by x,y only; clicking by ref needs v0\.2\.16/);
+  assert.match(clickByRefRefusal("computer", byRef, null), /\(version unknown\) clicks by x,y only/);
+  assert.equal(clickByRefRefusal("computer", byRef, CLICK_BY_REF_SINCE), null);
+  assert.equal(clickByRefRefusal("computer", byRef, "0.3.0"), null);
+  assert.equal(clickByRefRefusal("computer", { action: "left_click", x: 1, y: 2 }, "0.2.15"), null);
+  assert.equal(clickByRefRefusal("computer", { action: "type", text: "a", ref: "e1" }, "0.2.15"), null);
+  assert.equal(clickByRefRefusal("form_input", { ref: "e1", value: "a" }, "0.2.15"), null);
 });

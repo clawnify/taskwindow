@@ -4,6 +4,26 @@ import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { STORE_EXTENSION_ID } from "./store.js";
+import { compareVersions } from "./updates.js";
+
+/** The first extension that clicks an element by ref or selector. */
+export const CLICK_BY_REF_SINCE = "0.2.16";
+const ON_ELEMENT = new Set(["left_click", "right_click", "middle_click", "double_click", "triple_click", "mouse_move"]);
+
+/**
+ * A click by element sent to an extension that predates it would click at
+ * x ?? 0, y ?? 0, the page's top-left corner, since an older computer() ignores
+ * ref. Chrome updates the extension from the Web Store on its own schedule, so
+ * a new daemon meets an old extension for a while: refuse there instead.
+ */
+export function clickByRefRefusal(tool, args, extensionVersion) {
+  if (tool !== "computer" || !ON_ELEMENT.has(args?.action) || (!args.ref && !args.selector)) return null;
+  if (extensionVersion && compareVersions(extensionVersion, CLICK_BY_REF_SINCE) >= 0) return null;
+  return (
+    `This TaskWindow extension (${extensionVersion ? `v${extensionVersion}` : "version unknown"}) clicks by x,y only; clicking by ref needs v${CLICK_BY_REF_SINCE}, ` +
+    "which Chrome installs from the Web Store on its own. Until then take a screenshot and click at x,y."
+  );
+}
 
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
@@ -474,6 +494,8 @@ export function registerTools(server, { bridge, version, updates = null, logger 
         // it. The retry with that token (same task and url) then gets the tab
         // the first call opened, not a second tab in a second group.
         if (def.name === "tabs_create" && !forwardedArgs.sessionToken) forwardedArgs.sessionToken = randomUUID();
+        const refusal = clickByRefRefusal(def.name, forwardedArgs, bridge.lastHello?.version);
+        if (refusal) throw new Error(refusal);
         let result;
         try {
           result = await bridge.sendTool(def.name, forwardedArgs, def.timeoutMs);
@@ -559,6 +581,8 @@ async function runBatch({ steps, sessionToken }, bridge, logger) {
       if (!parsed.success) {
         throw new Error(`invalid params: ${parsed.error.issues.map((e) => `${e.message} at ${e.path.join(".") || "(root)"}`).join("; ")}`);
       }
+      const refusal = clickByRefRefusal(tool, parsed.data, bridge.lastHello?.version);
+      if (refusal) throw new Error(refusal);
       const result = await bridge.sendTool(tool, parsed.data, def.timeoutMs);
       results.push({ step: i + 1, tool, ok: true, result });
     } catch (err) {

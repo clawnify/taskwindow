@@ -205,6 +205,11 @@ export async function computer(params) {
     const result = await computer({ ...params, ref: undefined, selector: undefined, x: at.x, y: at.y, targetWidth: params.targetWidth ?? at.width });
     return { ...result, text: `${result.text}, on ${at.target}` };
   }
+  // A click with no target used to land at (0, 0), the page's top-left corner:
+  // what an older daemon sends when it drops a ref it does not know.
+  if (ON_ELEMENT.has(params.action) && (!Number.isFinite(params.x) || !Number.isFinite(params.y))) {
+    throw new Error(`computer "${params.action}" needs x and y, or the element's ref from read_page/find`);
+  }
   const { action } = params;
   const tab = await resolveTab(params.tabId, params.sessionToken);
 
