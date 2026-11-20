@@ -3,6 +3,15 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## Unreleased
+
+### Changed
+
+**Clicking by ref says who it is for.** The `computer` tool and its `ref`
+parameter now say that a click by ref is the route for a model that cannot see
+screenshots, and that a model that can see them keeps clicking at x,y. Read
+without that, the new parameter looked like the way every agent should click.
+
 ## 0.2.16
 
 ### Added
