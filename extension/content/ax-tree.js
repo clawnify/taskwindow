@@ -207,7 +207,13 @@
     const x = Math.round(r.left + r.width / 2);
     const y = Math.round(r.top + r.height / 2);
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error("that element could not be scrolled into view");
-    const hit = document.elementFromPoint(x, y);
+    // Ask the element's own tree. From the document, anything inside a shadow
+    // root hit-tests as its host, so every element in a web component looked
+    // covered. A shadow root's elementFromPoint still returns an overlay from
+    // the page (a cookie banner over the component), so a covered one is
+    // still refused.
+    const root = el.getRootNode();
+    const hit = (typeof root.elementFromPoint === "function" ? root : document).elementFromPoint(x, y);
     if (hit && hit !== el && !el.contains(hit)) {
       throw new Error(`something else is on top of that element (${describe(hit)}): close it first, or take a screenshot`);
     }
