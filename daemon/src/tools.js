@@ -158,7 +158,7 @@ const rawDefs = [
     description:
       "Screenshot and low-level mouse/keyboard control of a tab via the Chrome DevTools Protocol. " +
       "Actions: screenshot (PNG of the viewport, or full page with fullPage), left_click / right_click / " +
-      "middle_click / double_click / triple_click (at x,y, or on an element: pass its ref from read_page/find instead), " +
+      "middle_click / double_click / triple_click (at x,y read off a screenshot; see ref for models that cannot see screenshots), " +
       "type (text into the focused element), " +
       "key (named key press, e.g. Enter, Tab, Escape, ArrowLeft, Backspace), scroll (by dx/dy pixels), " +
       "mouse_move, wait, idle. Screenshots are in CSS pixels (1 image pixel = 1 coordinate unit, on any display density), so " +
@@ -183,7 +183,7 @@ const rawDefs = [
         .string()
         .optional()
         .describe(
-          "For clicks and mouse_move: the element's ref from read_page/find (e.g. e42), in place of x,y. Clicks its centre, scrolling it into view; refused when something covers it."
+          "Only for a model that cannot see screenshots: such a model reads the page with read_page or find and clicks an element by the ref they give it (e.g. e42), in place of x,y. If you can see screenshots, click at x,y on one as usual and leave this out. Clicks the element's centre, scrolling it into view; refused when something covers it."
         ),
       selector: z.string().optional().describe("For clicks and mouse_move: a CSS selector, as a fallback when no ref is available"),
       text: z.string().optional().describe('Text for the "type" action'),
@@ -243,7 +243,7 @@ const rawDefs = [
     name: "read_page",
     description:
       "Structured accessibility-style snapshot of the page: a text tree of interactive elements and content, " +
-      "each labelled with a ref (e.g. e42) you can pass to computer clicks, form_input and file_upload. Cheaper and more reliable " +
+      "each labelled with a ref (e.g. e42) you can pass to form_input and file_upload (and to computer clicks, for a model that cannot see screenshots). Cheaper and more reliable " +
       "than a screenshot for forms and navigation.",
     inputSchema: { tabId: tabId.optional() },
     timeoutMs: 20_000,
