@@ -3,6 +3,16 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.18
+
+### Fixed
+
+**Clicking by ref works inside web components.** An element inside a shadow
+root (a web component, many design systems) appears in `read_page`, but a
+click on it by ref was refused as covered by the component itself. The check
+now asks the element's own tree what is on top, so only a real overlay, such
+as a cookie banner over the component, refuses the click.
+
 ## 0.2.17
 
 ### Changed
