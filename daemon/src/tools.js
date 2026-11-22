@@ -25,6 +25,27 @@ export function clickByRefRefusal(tool, args, extensionVersion) {
   );
 }
 
+/** The first extension that waits for a Promise javascript_execute's script returns. */
+export const AWAITS_RETURNED_PROMISE_SINCE = "0.2.19";
+
+/**
+ * An older extension reports a Promise the script returned as {} instead of
+ * waiting for it, and that reads as a real, empty answer. The daemon cannot
+ * tell the two apart, so until the Web Store update arrives every {} from such
+ * an extension says what it may be and how to get the value.
+ */
+export function unawaitedPromiseNote(tool, args, result, extensionVersion) {
+  if (tool !== "javascript_execute" || args?.awaitPromise === false) return null;
+  if (extensionVersion && compareVersions(extensionVersion, AWAITS_RETURNED_PROMISE_SINCE) >= 0) return null;
+  const value = result?.data?.result;
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length) return null;
+  return (
+    `Note: if the script returned a Promise (an async function call, fetch(...).then(...), new Promise(...)), this {} is the Promise, not its value. ` +
+    `This TaskWindow extension (${extensionVersion ? `v${extensionVersion}` : "version unknown"}) does not wait for one; v${AWAITS_RETURNED_PROMISE_SINCE} does, ` +
+    "and Chrome installs it from the Web Store on its own. Until then put a top-level await in front of the expression, e.g. `await fetch(url).then(r => r.status)`."
+  );
+}
+
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
 // Injected into every browser tool below (see toolDefs) rather than spread by
@@ -503,6 +524,8 @@ export function registerTools(server, { bridge, version, updates = null, logger 
           if (err.code !== "TIMEOUT") throw err;
           throw new Error(`${err.message}. ${timeoutAdvice(def.name, forwardedArgs)}`);
         }
+        const promiseNote = unawaitedPromiseNote(def.name, forwardedArgs, result, bridge.lastHello?.version);
+        if (promiseNote) result.text = `{}\n${promiseNote}`;
         if (save_to_disk && result?.image) {
           try {
             const savedPath = await saveImageToDisk(result.image);
@@ -584,6 +607,8 @@ async function runBatch({ steps, sessionToken }, bridge, logger) {
       const refusal = clickByRefRefusal(tool, parsed.data, bridge.lastHello?.version);
       if (refusal) throw new Error(refusal);
       const result = await bridge.sendTool(tool, parsed.data, def.timeoutMs);
+      const promiseNote = unawaitedPromiseNote(tool, parsed.data, result, bridge.lastHello?.version);
+      if (promiseNote) result.text = `{}\n${promiseNote}`;
       results.push({ step: i + 1, tool, ok: true, result });
     } catch (err) {
       logger.error(`[mcp] batch step ${i + 1} (${tool}) failed:`, err.message);
