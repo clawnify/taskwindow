@@ -3,6 +3,41 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.20
+
+### Security
+
+**Extension pages are off limits to agents.** Tools no longer open a browser
+extension's own pages (`chrome-extension://...`), TaskWindow's settings page
+included, and refuse to act on a tab that shows one. Such a tab can still be
+closed or navigated to a web page. `javascript_execute` does not run on the
+responsive view's own page either; screenshots and clicks on that view work as
+before. These pages are not web content, and the settings on them are yours to
+change, not the agent's.
+
+The check is in the extension, which Chrome updates from the Web Store on its
+own schedule. A daemon from this release applies it as well, so it holds for an
+older extension too: run `taskwindow update` to have it now.
+
+### Added
+
+**The page tools read same-origin iframes.** `read_page`, `find`,
+`get_page_text`, `form_input`, `file_upload`, `upload_image` and clicks by ref
+or selector saw the top document only. An app that shows its pages inside its
+own shell frame looked almost empty, and its fields could not be filled or
+clicked by ref. What is inside a same-origin iframe, and inside frames within
+it, is now part of the page: it gets refs, a CSS selector matches in it, a
+click lands on it, and its text is in `get_page_text` under an `[iframe]` line.
+A cross-origin iframe stays a single `iframe` line. This is in the extension,
+so it arrives with the Web Store update.
+
+**Flows: how to drive TaskWindow from a script.** The README has a new section
+with a short script that calls the tools over the daemon's own address, for a
+job an agent repeats: the agent writes the script once and runs it in one turn,
+values go in as data, and a file is read from disk by the script, so its bytes
+never pass through the model. Nothing in TaskWindow had to change for this; a
+test now pins the single-request call the script relies on.
+
 ## 0.2.19
 
 ### Fixed

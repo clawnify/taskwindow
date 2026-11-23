@@ -46,7 +46,8 @@ const canned = {
   form_input: (params) => ({ data: { filled: true, value: String(params?.value ?? "") } }),
   file_upload: { data: { attached: ["a.txt"] } },
   upload_image: { data: { pasted: true } },
-  javascript_execute: { data: { result: 42 } },
+  // A script that names ECHO_SCRIPT gets back what the daemon actually sent.
+  javascript_execute: (params) => (String(params?.code).includes("ECHO_SCRIPT") ? { text: String(params.code) } : { data: { result: 42 } }),
   read_console_messages: { data: [{ level: "error", text: "Uncaught TypeError: x is not a function" }] },
   read_network_requests: { data: [{ method: "GET", url: "https://example.com/", status: 200 }] },
   shortcuts_list: { data: [{ name: "screenshot", description: "Take a screenshot" }] },

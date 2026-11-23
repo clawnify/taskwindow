@@ -235,6 +235,47 @@ async function main() {
   });
   check("batch aborts on failing step with step number", batchBad.isError === true && batchBad.content[0].text.includes("aborted at step 2"));
 
+  console.log("extension pages:");
+  const OWN_PAGE = "chrome-extension://fakefakefakefakefakefakefakefake/options/options.html";
+  for (const [tool, args] of [
+    ["tabs_create", { url: OWN_PAGE, task: "Settings", longRunning: false }],
+    ["navigate", { url: OWN_PAGE }],
+    ["set_viewport", { url: OWN_PAGE, viewports: [{ width: 390, height: 844 }] }],
+  ]) {
+    check(`${tool} refuses an extension page before it reaches the extension`, await expectToolError(client, tool, args, "Extension pages are off limits"));
+  }
+  const batchOwn = await client.callTool({
+    name: "browser_batch",
+    arguments: { steps: [{ tool: "tabs_list" }, { tool: "navigate", params: { url: OWN_PAGE } }] },
+  });
+  check("a batch step is refused the same way", batchOwn.isError === true && /aborted at step 2 \(navigate\): Extension pages are off limits/.test(batchOwn.content[0].text), batchOwn.content[0].text);
+  // The fake extension's version is not x.y.z, so it counts as one that predates the rule.
+  for (const viaBatch of [false, true]) {
+    const sent = await client.callTool(viaBatch
+      ? { name: "browser_batch", arguments: { steps: [{ tool: "javascript_execute", params: { code: "'ECHO_SCRIPT'" } }] } }
+      : { name: "javascript_execute", arguments: { code: "'ECHO_SCRIPT'" } });
+    const script = sent.content[0].text;
+    check(`a script sent to an older extension carries the extension-page check${viaBatch ? " (batch step)" : ""}`,
+      /if \(\/\^chrome-extension:\/\.test\(location\.origin\)\) throw /.test(script) && script.trimEnd().endsWith("'ECHO_SCRIPT'"), script);
+  }
+
+  console.log("scripts as callers:");
+  // What a script that drives TaskWindow relies on (README, "Scripting"): one
+  // POST per tool call, with no initialize handshake before it.
+  const rpc = (name, args) =>
+    fetch(`${BASE}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+    });
+  const bare = await rpc("tabs_list", { sessionToken: "s-1" });
+  const bareBody = await bare.json().catch(() => null);
+  check("a single tools/call POST answers without a handshake",
+    bare.status === 200 && bareBody?.result?.isError !== true && /Example/.test(bareBody?.result?.content?.[0]?.text || ""), JSON.stringify(bareBody));
+  check("and restates the session token like any other call", bareBody?.result?.content?.some((c) => c.text === "session: s-1"));
+  const bareBad = await (await rpc("tabs_close", { tabId: 999, sessionToken: "s-1" })).json();
+  check("a failing tool is isError in the same shape", bareBad?.result?.isError === true && /No tab with id 999/.test(bareBad.result.content[0].text));
+
   const batchNested = await client.callTool({
     name: "browser_batch",
     arguments: { steps: [{ tool: "browser_batch", params: { steps: [] } }] },
