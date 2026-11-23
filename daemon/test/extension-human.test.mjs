@@ -57,9 +57,14 @@ test("movePath leaves the straight line and does not repeat one fixed angle", as
   const { human } = await load(makeChrome());
   const from = { x: 100, y: 100 };
   const to = { x: 900, y: 500 };
+  // 600 paths, not 60. The midpoint's direction falls in ten common buckets
+  // 95% of the time and in a few rare ones otherwise, so 60 paths showed 10 or
+  // fewer distinct directions in 6% of runs and failed a release by chance. At
+  // 600 that is less than one run in a trillion.
+  const PATHS = 600;
   let bowed = 0;
   const angles = new Set();
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < PATHS; i++) {
     const path = human.movePath(from, to, { targetWidth: 20 });
     const mid = path[Math.floor(path.length / 2)];
     // Perpendicular distance of the midpoint from the straight line.
@@ -68,7 +73,7 @@ test("movePath leaves the straight line and does not repeat one fixed angle", as
     if (off > 2) bowed++;
     angles.add(Math.round(Math.atan2(mid.y - from.y, mid.x - from.x) * 40));
   }
-  assert.ok(bowed > 50, `paths should curve, only ${bowed}/60 did`);
+  assert.ok(bowed > PATHS * (5 / 6), `paths should curve, only ${bowed}/${PATHS} did`);
   assert.ok(angles.size > 10, `directions should spread, saw ${angles.size} distinct`);
 });
 
@@ -86,6 +91,7 @@ test("movePath decelerates into the target rather than arriving at full speed", 
 test("scrollPlan splits unevenly but its deltas sum to exactly what was asked", async () => {
   const { human } = await load(makeChrome());
   let multi = 0;
+  let equalSlices = 0;
   for (let i = 0; i < 300; i++) {
     const dy = Math.round((Math.random() - 0.5) * 4000);
     const dx = Math.round((Math.random() - 0.5) * 400);
@@ -98,10 +104,13 @@ test("scrollPlan splits unevenly but its deltas sum to exactly what was asked", 
     if (plan.length > 1) {
       multi++;
       const sizes = plan.map((b) => Math.abs(b.dy));
-      assert.ok(Math.max(...sizes) - Math.min(...sizes) > 0, "bursts must not be equal slices");
+      if (Math.max(...sizes) === Math.min(...sizes)) equalSlices++;
     }
   }
   assert.ok(multi > 200, `long scrolls should break up, only ${multi}/300 did`);
+  // Counted over the run, not asserted on every plan: two bursts round to
+  // exactly half each about once in 60,000 plans, which failed 0.4% of runs.
+  assert.ok(equalSlices <= 5, `bursts must not be equal slices, ${equalSlices}/${multi} were`);
 });
 
 test("a human scroll reaches the page as several gestures, with Chrome's inverted sign", async () => {
