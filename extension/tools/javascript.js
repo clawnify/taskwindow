@@ -1,4 +1,4 @@
-import { resolveTab } from "./tabs.js";
+import { resolveTab, refuseExtensionPage } from "./tabs.js";
 import { withDebugger, send } from "./cdp.js";
 
 let calls = 0;
@@ -10,6 +10,9 @@ let calls = 0;
 // GitHub, …) rejected the tool outright.
 export async function javascriptExecute({ code, awaitPromise = true, tabId, sessionToken }) {
   const tab = await resolveTab(tabId, sessionToken);
+  // The responsive harness is an extension page too, and the one a session
+  // holds: a script evaluated there would run with the extension's rights.
+  refuseExtensionPage(tab, { harness: false });
   return withDebugger(tab.id, async (tid) => {
     const awaiting = awaitPromise !== false;
     // The result is taken as a handle first (see below). Chrome keeps the

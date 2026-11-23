@@ -82,6 +82,45 @@ async function policyAllowsAll() {
   return stored[ALLOW_ALL_KEY] === true;
 }
 
+/**
+ * Extension pages are off limits to every tool. TaskWindow's own pages
+ * (settings, popover, the responsive harness) run with the extension's rights:
+ * its stored settings, such as allowAllTabs above, and Chrome's tab and
+ * debugger calls. A tool that opened one or acted on one would be acting as
+ * the extension, and "the agent cannot change it" would no longer hold. Chrome
+ * keeps other extensions' pages out of reach by itself; they are refused here
+ * all the same.
+ */
+// Any chain of schemes ending in chrome-extension: (blob:, view-source:), so
+// an address that merely mentions one further in stays a web page.
+const EXTENSION_PAGE = /^(?:[a-z][a-z0-9+.-]*:)*chrome-extension:/i;
+const EXTENSION_PAGES_OFF_LIMITS =
+  "Extension pages are off limits: TaskWindow tools do not open or act on a browser extension's own pages (chrome-extension://...), TaskWindow's included.";
+
+function isExtensionPage(url) {
+  return EXTENSION_PAGE.test(String(url || "").trim());
+}
+
+/** For every tool that opens an address the caller gives it. */
+export function refuseExtensionUrl(url) {
+  if (isExtensionPage(url)) throw new Error(EXTENSION_PAGES_OFF_LIMITS);
+}
+
+/**
+ * For a tab a tool is about to act on. Its pending address counts: by the time
+ * the tool runs, the page may have arrived. The responsive harness is the one
+ * extension page a session holds on purpose, to screenshot and click the
+ * frames in it, so it passes unless the tool runs the caller's own script
+ * (`harness: false`).
+ */
+export function refuseExtensionPage(tab, { harness = true } = {}) {
+  const shown = [tab.url, tab.pendingUrl].filter(isExtensionPage);
+  if (!shown.length) return;
+  const harnessUrl = chrome.runtime.getURL("responsive/responsive.html");
+  if (harness && shown.every((url) => url.startsWith(harnessUrl))) return;
+  throw new Error(`${EXTENSION_PAGES_OFF_LIMITS} Tab ${tab.id} shows one: navigate it to a web page or close it.`);
+}
+
 /** Default on: agent tabs open in their own window, not the user's. */
 async function policySeparateWindow() {
   const stored = await chrome.storage.local.get(SEPARATE_WINDOW_KEY);
@@ -284,10 +323,14 @@ async function assertAllowedTab(tab, sessionToken) {
  * The tab a tool acts on, checked against the session's access. A tab behind a
  * page dialog answers nothing, so by default this fails fast naming the dialog
  * (the one choke point every per-tab tool passes, so no tool can hang on it);
- * only tools that work on a blocked tab pass { allowDialog: true }.
+ * only tools that work on a blocked tab pass { allowDialog: true }. A tab that
+ * shows an extension page is refused here for the same reason, so no tool can
+ * forget to (see refuseExtensionPage); only closing it or navigating it away
+ * passes { allowExtensionPage: true }.
  */
-export async function resolveTab(tabId, sessionToken, { allowDialog = false } = {}) {
+export async function resolveTab(tabId, sessionToken, { allowDialog = false, allowExtensionPage = false } = {}) {
   const tab = await findTab(tabId, sessionToken);
+  if (!allowExtensionPage) refuseExtensionPage(tab);
   if (!allowDialog) assertNoDialog(tab.id);
   return tab;
 }
@@ -713,6 +756,7 @@ async function rememberedTask(token) {
 }
 
 export async function tabsCreate({ url, task, longRunning, sessionToken, render } = {}) {
+  refuseExtensionUrl(url);
   const token = normalizeToken(sessionToken) || crypto.randomUUID();
   // The task names the session's one group, so it is read once and then fixed:
   // once the session has a group, every later tab joins it and a `task` given
@@ -897,7 +941,7 @@ async function openInTaskGroup({ url, taskUsed, token, longRunning, render }) {
 export async function tabsClose({ tabId, sessionToken } = {}) {
   // Via resolveTab, not a bare tabs.get: it is the one place that looks a tab
   // up and checks it, so closing cannot leak which ids exist.
-  const tab = await resolveTab(tabId, sessionToken, { allowDialog: true });
+  const tab = await resolveTab(tabId, sessionToken, { allowDialog: true, allowExtensionPage: true });
   await chrome.tabs.remove(tab.id);
   return { text: `closed tab ${tab.id}` };
 }
@@ -972,7 +1016,9 @@ async function loadUnlessAsked(tabId, start, verb, onUnsaved) {
 }
 
 export async function navigate({ url, tabId, sessionToken, render, onUnsaved } = {}) {
-  const tab = await resolveTab(tabId, sessionToken);
+  refuseExtensionUrl(url);
+  // Leaving an extension page is always allowed; arriving on one never is.
+  const tab = await resolveTab(tabId, sessionToken, { allowExtensionPage: true });
   // Resume capture before loading; a restricted current page must still be
   // able to navigate away even when Chrome refuses its debugger attachment.
   await ensureAttached(tab.id).catch(() => {});

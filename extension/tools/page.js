@@ -3,7 +3,8 @@ import { resolveTab } from "./tabs.js";
 /**
  * Bridge to the page-level content scripts (content/ax-tree.js). We inject on
  * demand (works even for tabs opened before the extension loaded) and talk via
- * chrome.tabs.sendMessage. Top frame only for now.
+ * chrome.tabs.sendMessage. The script is injected into the top frame only and
+ * reaches same-origin iframes from there; a cross-origin frame is not read.
  */
 async function pageOp(tabId, op, params) {
   try {

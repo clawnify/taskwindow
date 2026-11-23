@@ -1,6 +1,9 @@
 /**
  * Page-level ops behind read_page / find / get_page_text / form_input /
- * file_upload / upload_image. Injected on demand, top frame only.
+ * file_upload / upload_image. Injected on demand into the top frame, and from
+ * there the ops also reach same-origin iframes, whose documents this script
+ * can read: an app that shows its pages inside its own shell frame is one page
+ * to a person. A cross-origin frame stays a single "iframe" line.
  *
  * Walks the DOM and builds an accessibility-style snapshot in which every
  * visible, possibly-interactive element gets a stable-for-this-snapshot ref
@@ -15,6 +18,35 @@
 
   let refMap = new Map();
   let refCounter = 0;
+
+  /** The document inside a frame, or null when the page may not read it (another origin). */
+  function frameDoc(el) {
+    if (el.tagName !== "IFRAME" && el.tagName !== "FRAME") return null;
+    try {
+      return el.contentDocument || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The window an element lives in. Its styles, its viewport and the
+   * constructors its page checks events against are that window's, not the top
+   * one's.
+   */
+  function viewOf(el) {
+    return el.ownerDocument?.defaultView || window;
+  }
+
+  /** Every element matching `selector` in the document and in the same-origin frames under it, in page order. */
+  function queryAllDeep(doc, selector) {
+    const out = [...doc.querySelectorAll(selector)];
+    for (const frame of doc.querySelectorAll("iframe, frame")) {
+      const inner = frameDoc(frame);
+      if (inner) out.push(...queryAllDeep(inner, selector));
+    }
+    return out;
+  }
 
   function isVisible(el, style) {
     if (el.hidden || el.getAttribute("aria-hidden") === "true") return false;
@@ -72,7 +104,7 @@
     if (labelledby) {
       const t = labelledby
         .split(/\s+/)
-        .map((id) => document.getElementById(id))
+        .map((id) => el.ownerDocument.getElementById(id))
         .filter(Boolean)
         .map(textOf)
         .join(" ")
@@ -82,7 +114,7 @@
 
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
       if (el.id) {
-        const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        const label = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
         if (label) return textOf(label).slice(0, MAX_TEXT) || el.getAttribute("placeholder") || el.name || el.id;
       }
       const closest = el.closest("label");
@@ -139,7 +171,7 @@
   function walk(el, depth, out, includeAll) {
     if (!el || SKIP_TAGS.has(el.tagName)) return;
     if (el.type === "hidden") return;
-    const style = getComputedStyle(el);
+    const style = viewOf(el).getComputedStyle(el);
     if (!isVisible(el, style)) return;
 
     const role = roleOf(el);
@@ -158,6 +190,8 @@
     if (el.shadowRoot) {
       for (const child of el.shadowRoot.children) walk(child, depth + 1, out, false);
     }
+    const inner = frameDoc(el);
+    if (inner) walk(inner.body || inner.documentElement, depth + 1, out, false);
     for (const child of el.children) walk(child, depth + 1, out, false);
   }
 
@@ -180,7 +214,7 @@
       throw new Error(`ref "${ref}" is stale — run read_page or find again`);
     }
     if (selector) {
-      const el = document.querySelector(selector);
+      const el = queryAllDeep(document, selector)[0];
       if (el) return el;
       throw new Error(`no element matches selector "${selector}"`);
     }
@@ -188,43 +222,79 @@
   }
 
   /**
-   * Where to click an element named by ref or selector: its centre in viewport
-   * CSS pixels, the coordinates CDP input takes (top frame only, as every op
-   * here). Scrolled into view first. Refused when something else is on top of
-   * that point (a cookie banner, a modal, a sticky header), so the click never
-   * lands on the overlay in the element's place.
+   * An element's centre in its own window, then in each window above it up to
+   * the tab's: a frame's viewport starts inside the frame element's border and
+   * padding. One entry for an element of the top document.
+   */
+  function centres(el) {
+    const r = el.getBoundingClientRect();
+    const out = [];
+    let x = r.left + r.width / 2;
+    let y = r.top + r.height / 2;
+    for (let node = el; ; ) {
+      const view = viewOf(node);
+      out.push({ node, view, x: Math.round(x), y: Math.round(y) });
+      const frame = view.frameElement;
+      if (!frame) return out;
+      const box = frame.getBoundingClientRect();
+      const style = viewOf(frame).getComputedStyle(frame);
+      x += box.left + frame.clientLeft + (parseFloat(style.paddingLeft) || 0);
+      y += box.top + frame.clientTop + (parseFloat(style.paddingTop) || 0);
+      node = frame;
+    }
+  }
+
+  /**
+   * Where to click an element named by ref or selector: its centre in the
+   * tab's viewport CSS pixels, the coordinates CDP input takes, also for an
+   * element inside a same-origin frame. Scrolled into view first. Refused when
+   * something else is on top of that point (a cookie banner, a modal, a sticky
+   * header), so the click never lands on the overlay in the element's place.
    */
   function locate({ ref, selector }) {
     const el = resolveTarget({ ref, selector });
     if (!el) throw new Error("a click on an element needs its ref (from read_page/find) or a selector");
-    let r = el.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) throw new Error("that element has no size on the page now: run read_page again");
-    const inView = r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth;
-    if (!inView) {
+    // Visible means visible in every window on the way up: inside its frame's
+    // viewport, and that spot of the frame inside the tab's.
+    const onScreen = (points) => points.every((p) => p.x >= 0 && p.y >= 0 && p.x < p.view.innerWidth && p.y < p.view.innerHeight);
+    const own = viewOf(el);
+    const whole = r.top >= 0 && r.left >= 0 && r.bottom <= own.innerHeight && r.right <= own.innerWidth;
+    let points = centres(el);
+    if (!whole || !onScreen(points)) {
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-      r = el.getBoundingClientRect();
+      points = centres(el);
     }
-    const x = Math.round(r.left + r.width / 2);
-    const y = Math.round(r.top + r.height / 2);
-    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error("that element could not be scrolled into view");
+    if (!onScreen(points)) throw new Error("that element could not be scrolled into view");
     // Ask the element's own tree. From the document, anything inside a shadow
     // root hit-tests as its host, so every element in a web component looked
     // covered. A shadow root's elementFromPoint still returns an overlay from
     // the page (a cookie banner over the component), so a covered one is
-    // still refused.
-    const root = el.getRootNode();
-    const hit = (typeof root.elementFromPoint === "function" ? root : document).elementFromPoint(x, y);
-    if (hit && hit !== el && !el.contains(hit)) {
-      throw new Error(`something else is on top of that element (${describe(hit)}): close it first, or take a screenshot`);
+    // still refused. For an element in a frame the same is asked of the frame
+    // in its parent, so an overlay over the frame refuses it too.
+    for (const p of points) {
+      const root = p.node.getRootNode();
+      const hit = (typeof root.elementFromPoint === "function" ? root : p.node.ownerDocument).elementFromPoint(p.x, p.y);
+      if (hit && hit !== p.node && !p.node.contains(hit)) {
+        throw new Error(`something else is on top of that element (${describe(hit)}): close it first, or take a screenshot`);
+      }
     }
-    return { x, y, width: Math.round(r.width), target: describe(el) };
+    const { x, y } = points[points.length - 1];
+    return { x, y, width: Math.round(el.getBoundingClientRect().width), target: describe(el) };
+  }
+
+  /** Fire a bubbling event of the element's own window, the one its page's code knows. */
+  function fire(el, type) {
+    el.dispatchEvent(new (viewOf(el).Event)(type, { bubbles: true }));
   }
 
   function nativeValue(el, value) {
-    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const view = viewOf(el);
+    const proto = el.tagName === "TEXTAREA" ? view.HTMLTextAreaElement.prototype : view.HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    fire(el, "input");
+    fire(el, "change");
   }
 
   function formInput({ value, ref, selector, clear }) {
@@ -237,8 +307,8 @@
       const want = value === true || value === "true" || value === 1 || value === "1";
       if (el.type === "checkbox") el.checked = want;
       else if (want) el.checked = true;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+      fire(el, "input");
+      fire(el, "change");
       return { target: `${el.tagName.toLowerCase()}[type=${el.type}]`, value: el.checked };
     }
 
@@ -250,8 +320,8 @@
         throw new Error(`option "${want}" not in select; options: ${options}`);
       }
       el.value = opt.value;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+      fire(el, "input");
+      fire(el, "change");
       return { target: "select", value: opt.value };
     }
 
@@ -262,9 +332,9 @@
 
     if (el.isContentEditable) {
       el.focus();
-      if (clear !== false) document.getSelection().selectAllChildren(el);
-      document.execCommand("insertText", false, target);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
+      if (clear !== false) viewOf(el).getSelection().selectAllChildren(el);
+      el.ownerDocument.execCommand("insertText", false, target);
+      fire(el, "input");
       return { target: "contenteditable", value: textOf(el).slice(0, 100) };
     }
 
@@ -289,8 +359,8 @@
       if (el.tagName === "INPUT" && el.type === "file") return el;
       throw new Error(`target ${ref || selector} is not a file input`);
     }
-    const visible = Array.from(document.querySelectorAll('input[type="file"]')).find((input) => {
-      const style = getComputedStyle(input);
+    const visible = queryAllDeep(document, 'input[type="file"]').find((input) => {
+      const style = viewOf(input).getComputedStyle(input);
       return isVisible(input, style) || input.closest("form");
     });
     if (!visible) throw new Error("no visible file input found on the page — pass a selector");
@@ -300,36 +370,60 @@
   function fileUpload({ files, ref, selector }) {
     if (!files?.length) throw new Error("file_upload needs files: [{name, data(base64), mimeType?}]");
     const input = fileInputFor(ref, selector);
-    const dt = new DataTransfer();
+    const view = viewOf(input);
+    const dt = new view.DataTransfer();
     for (const f of files) {
-      dt.items.add(new File([bytesOf(f.data)], f.name || "upload.bin", { type: f.mimeType || "application/octet-stream" }));
+      dt.items.add(new view.File([bytesOf(f.data)], f.name || "upload.bin", { type: f.mimeType || "application/octet-stream" }));
     }
     input.files = dt.files;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    fire(input, "input");
+    fire(input, "change");
     return { target: `input[type=file]${input.name ? `[name=${input.name}]` : ""}`, names: Array.from(input.files).map((f) => f.name) };
+  }
+
+  /** The focused element, followed into a same-origin frame when the focus is inside one. */
+  function focused() {
+    let el = document.activeElement;
+    for (let inner; el && (inner = frameDoc(el)) && inner.activeElement; ) el = inner.activeElement;
+    return el;
+  }
+
+  /**
+   * The text a person can read on the page: the top document's, then each
+   * visible same-origin frame's under a line that says a frame starts.
+   */
+  function pageText(doc) {
+    const parts = [doc.body?.innerText || doc.documentElement?.innerText || ""];
+    for (const frame of doc.querySelectorAll("iframe, frame")) {
+      const inner = frameDoc(frame);
+      if (!inner || !isVisible(frame, viewOf(frame).getComputedStyle(frame))) continue;
+      const text = pageText(inner).trim();
+      if (text) parts.push(`[iframe${frame.title ? ` "${frame.title}"` : ""}]\n${text}`);
+    }
+    return parts.join("\n\n");
   }
 
   function uploadImage({ data, mimeType = "image/png", name = "image.png", ref, selector }) {
     if (!data) throw new Error("upload_image needs data (base64 image)");
-    const target = (ref || selector) ? resolveTarget({ ref, selector }) : document.activeElement || document.body;
+    const target = (ref || selector) ? resolveTarget({ ref, selector }) : focused() || document.body;
 
     if (target.tagName === "INPUT" && target.type === "file") {
       return fileUpload({ files: [{ data, mimeType, name }], ref, selector });
     }
 
-    const dt = new DataTransfer();
-    dt.items.add(new File([bytesOf(data)], name, { type: mimeType }));
+    const view = viewOf(target);
+    const dt = new view.DataTransfer();
+    dt.items.add(new view.File([bytesOf(data)], name, { type: mimeType }));
     const pasteInit = { bubbles: true, cancelable: true, clipboardData: dt };
     let delivered = false;
     try {
-      delivered = target.dispatchEvent(new ClipboardEvent("paste", pasteInit));
+      delivered = target.dispatchEvent(new view.ClipboardEvent("paste", pasteInit));
     } catch {}
     try {
-      target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      target.dispatchEvent(new view.DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
     } catch {}
     if (!delivered) {
-      document.dispatchEvent(new ClipboardEvent("paste", pasteInit));
+      target.ownerDocument.dispatchEvent(new view.ClipboardEvent("paste", pasteInit));
     }
     return { target: target.tagName.toLowerCase(), summary: `dispatched paste/drop with ${name} (${mimeType}) on <${target.tagName.toLowerCase()}>` };
   }
@@ -365,7 +459,7 @@
           }
           case "get_page_text": {
             const max = msg.params.maxLength || 50000;
-            const text = (document.body?.innerText || document.documentElement.innerText || "").slice(0, max);
+            const text = pageText(document).slice(0, max);
             sendResponse({ ok: true, text: text + (text.length >= max ? "\n…[truncated]" : "") });
             break;
           }

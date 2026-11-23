@@ -19,7 +19,7 @@
  *
  * Clearing closes the harness tab, the fallback tabs and the DNR rule.
  */
-import { resolveTab, ensureTaskGroup, currentTaskName, normalizeToken } from "./tabs.js";
+import { resolveTab, ensureTaskGroup, currentTaskName, normalizeToken, refuseExtensionUrl } from "./tabs.js";
 import { ensureAttached, retainDebugger, send } from "./cdp.js";
 
 const SESSION_KEY = "responsiveSession"; // per-agent-session suffix below
@@ -213,6 +213,9 @@ export async function setViewport({ viewports, url, tabId, sessionToken } = {}) 
     targetUrl = src.url || src.pendingUrl || "about:blank";
   }
   if (!targetUrl || String(targetUrl).includes(HARNESS_MARKER)) targetUrl = s?.url || "about:blank";
+  // Framed in the harness, an extension page would sit inside a page of its
+  // own origin, and the fallback would open it as a tab.
+  refuseExtensionUrl(targetUrl);
 
   if (!s) {
     const tab = await openInSessionGroup(harnessUrlFor(targetUrl, vps), taskName, token);

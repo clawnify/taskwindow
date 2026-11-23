@@ -98,6 +98,72 @@ taking the daemon connection from each other. For another MCP client, connect to
 | Debug | `read_console_messages`, `read_network_requests` |
 | Efficiency | `browser_batch` (multi-step in one call), `gif_record`, `set_viewport` (responsive view), `shortcuts_*` |
 
+The page tools (`read_page`, `find`, `get_page_text`, `form_input`,
+`file_upload`, `upload_image` and clicks by ref) read same-origin iframes as
+part of the page, so an app that shows its pages inside its own shell frame
+works like any other. A cross-origin iframe stays a single `iframe` line.
+
+## Flows: a script instead of twenty turns
+
+A job an agent repeats, such as filling the same long form every day, does not
+need a model turn per field. The agent works the page out once, writes a
+script, and from then on runs the script: one turn, the same steps every time.
+TaskWindow needs nothing extra for this, because a script can call the same
+tools the agent does. Each call is one HTTP request to the daemon, with no
+handshake before it.
+
+```js
+// node flow.mjs <sessionToken> values.json [photo.jpg]
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename } from "node:path";
+
+const [sessionToken, valuesFile, photo] = process.argv.slice(2);
+const token = process.env.TASKWINDOW_TOKEN || readFileSync(`${homedir()}/.taskwindow/token`, "utf8").trim();
+
+async function tool(name, args = {}) {
+  const res = await fetch(`http://127.0.0.1:${process.env.TASKWINDOW_PORT || 9377}/mcp`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { sessionToken, ...args } } }),
+  });
+  const { result, error } = await res.json();
+  const text = (result?.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+  if (error || result?.isError) throw new Error(error?.message || text);
+  return text;
+}
+
+// The page side, written once. It runs in the page; the values arrive as data, never as code.
+function fill(values) {
+  const now = {};
+  for (const [selector, value] of Object.entries(values)) {
+    const field = document.querySelector(selector);
+    if (!field) { now[selector] = "no such field"; continue; }
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+    now[selector] = field.value; // read back, so the caller sees what the page kept
+  }
+  return now;
+}
+
+const values = JSON.parse(readFileSync(valuesFile, "utf8"));
+console.log(await tool("javascript_execute", { code: `(${fill})(${JSON.stringify(values)})` }));
+
+// A file goes from disk to the page; the model never carries its bytes.
+if (photo) {
+  const data = readFileSync(photo).toString("base64");
+  console.log(await tool("file_upload", { selector: "input[type=file]", files: [{ name: basename(photo), data }] }));
+}
+```
+
+The agent passes the script the `sessionToken` it got from `tabs_create`, so
+the script acts on that session's tabs and nothing else, like the agent itself.
+The script reads its own files, with its own rights. A failed tool call comes
+back with `isError`, which the helper above turns into an exception, so a page
+that has changed stops the script and the agent takes over with the ordinary
+tools.
+
 ## Wonder: when synthetic input is not enough
 
 Some pages ignore a perfect click. A single wheel event carrying 1600px gives
@@ -138,7 +204,9 @@ in the mouse-dynamics literature, so do not build on it as camouflage.
   scoped to that session's groups, so concurrent agents never share tabs —
   even when they pick the same task name. By default the agent can only see
   and act on tabs in its own groups — never yours. You can click a group in
-  the toolbar popover to watch, and widen access in settings.
+  the toolbar popover to watch, and widen access in settings. Extension pages,
+  those settings among them, are off limits to every tool, so that choice
+  stays yours.
 - **Your focus is never taken**: nothing the agent does brings a tab or window
   forward on you. Chrome's `tabs.create` makes a new tab active by default and
   `windows.create` focuses the new window by default; TaskWindow always opens

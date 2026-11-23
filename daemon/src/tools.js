@@ -46,6 +46,48 @@ export function unawaitedPromiseNote(tool, args, result, extensionVersion) {
   );
 }
 
+/** The first extension that keeps its tools off extension pages itself. */
+export const REFUSES_EXTENSION_PAGES_SINCE = "0.2.20";
+// Any chain of schemes ending in chrome-extension: (blob:, view-source:), so
+// an address that merely mentions one further in stays a web page.
+const EXTENSION_PAGE = /^(?:[a-z][a-z0-9+.-]*:)*chrome-extension:/i;
+const EXTENSION_PAGES_OFF_LIMITS =
+  "Extension pages are off limits: TaskWindow tools do not open or act on a browser extension's own pages (chrome-extension://...), TaskWindow's included.";
+const OPENS_A_URL = new Set(["tabs_create", "navigate", "set_viewport"]);
+
+/**
+ * TaskWindow's own pages (settings, popover) run with the extension's rights,
+ * so a tool acting on one would be acting as the extension. The extension
+ * refuses them itself from REFUSES_EXTENSION_PAGES_SINCE on; refusing the
+ * address here as well covers an older one until Chrome updates it.
+ */
+export function extensionPageRefusal(tool, args) {
+  if (!OPENS_A_URL.has(tool) || typeof args?.url !== "string") return null;
+  return EXTENSION_PAGE.test(args.url.trim()) ? EXTENSION_PAGES_OFF_LIMITS : null;
+}
+
+/**
+ * The other half for an older extension: its javascript_execute runs on
+ * whatever page the tab shows, so the check travels in front of the script and
+ * runs in the page itself. On one line, so error line numbers still match the
+ * caller's script. A version that is not plain x.y.z compares as equal to
+ * anything, so it is taken as older: the check costs a page nothing.
+ */
+export function guardExtensionPages(tool, args, extensionVersion) {
+  if (tool !== "javascript_execute" || typeof args?.code !== "string") return args;
+  const checksItself = /^\d+\.\d+\.\d+$/.test(String(extensionVersion)) && compareVersions(extensionVersion, REFUSES_EXTENSION_PAGES_SINCE) >= 0;
+  if (checksItself) return args;
+  const check = `if (/^chrome-extension:/.test(location.origin)) throw new Error(${JSON.stringify(EXTENSION_PAGES_OFF_LIMITS)});`;
+  return { ...args, code: `${check} ${args.code}` };
+}
+
+/** What goes to the extension for a call, or a refusal thrown before anything is sent. */
+function prepareCall(tool, args, extensionVersion) {
+  const refusal = clickByRefRefusal(tool, args, extensionVersion) || extensionPageRefusal(tool, args);
+  if (refusal) throw new Error(refusal);
+  return guardExtensionPages(tool, args, extensionVersion);
+}
+
 const tabId = z.number().int().describe("Tab ID from tabs_list. Defaults to the active tab in your session's task groups.");
 
 // Injected into every browser tool below (see toolDefs) rather than spread by
@@ -265,7 +307,7 @@ const rawDefs = [
     description:
       "Structured accessibility-style snapshot of the page: a text tree of interactive elements and content, " +
       "each labelled with a ref (e.g. e42) you can pass to form_input and file_upload (and to computer clicks, for a model that cannot see screenshots). Cheaper and more reliable " +
-      "than a screenshot for forms and navigation.",
+      "than a screenshot for forms and navigation. A same-origin iframe is read as part of the page; a cross-origin one is a single iframe line.",
     inputSchema: { tabId: tabId.optional() },
     timeoutMs: 20_000,
   },
@@ -279,7 +321,7 @@ const rawDefs = [
   },
   {
     name: "get_page_text",
-    description: "Extract the page's visible text content (like copy-pasting the page body).",
+    description: "Extract the page's visible text content (like copy-pasting the page body), same-origin iframes included.",
     inputSchema: {
       tabId: tabId.optional(),
       maxLength: z.number().int().min(100).max(500_000).optional().describe("Truncate output to this many characters (default 50000)"),
@@ -290,7 +332,7 @@ const rawDefs = [
     name: "form_input",
     description:
       "Fill a form field: text inputs, textareas, checkboxes, radios, <select>s and contenteditable elements. " +
-      "Targets the element by ref (from read_page/find) or a CSS selector.",
+      "Targets the element by ref (from read_page/find) or a CSS selector; both reach into same-origin iframes.",
     inputSchema: {
       value: z.union([z.string(), z.number(), z.boolean()]).describe("Value to set. For checkboxes/radios use true/false; for selects use the option value or visible text."),
       ref: z.string().optional().describe("Element ref from read_page/find (e.g. e42)"),
@@ -304,7 +346,7 @@ const rawDefs = [
     name: "file_upload",
     description:
       "Attach local file content to a file input (<input type=file>). The file bytes are transferred through the " +
-      "daemon; target the input by ref or CSS selector.",
+      "daemon; target the input by ref or CSS selector, also inside a same-origin iframe.",
     inputSchema: {
       files: z.array(z.object({
         name: z.string().describe("File name (shown to the site)"),
@@ -515,11 +557,10 @@ export function registerTools(server, { bridge, version, updates = null, logger 
         // it. The retry with that token (same task and url) then gets the tab
         // the first call opened, not a second tab in a second group.
         if (def.name === "tabs_create" && !forwardedArgs.sessionToken) forwardedArgs.sessionToken = randomUUID();
-        const refusal = clickByRefRefusal(def.name, forwardedArgs, bridge.lastHello?.version);
-        if (refusal) throw new Error(refusal);
+        const sentArgs = prepareCall(def.name, forwardedArgs, bridge.lastHello?.version);
         let result;
         try {
-          result = await bridge.sendTool(def.name, forwardedArgs, def.timeoutMs);
+          result = await bridge.sendTool(def.name, sentArgs, def.timeoutMs);
         } catch (err) {
           if (err.code !== "TIMEOUT") throw err;
           throw new Error(`${err.message}. ${timeoutAdvice(def.name, forwardedArgs)}`);
@@ -604,9 +645,7 @@ async function runBatch({ steps, sessionToken }, bridge, logger) {
       if (!parsed.success) {
         throw new Error(`invalid params: ${parsed.error.issues.map((e) => `${e.message} at ${e.path.join(".") || "(root)"}`).join("; ")}`);
       }
-      const refusal = clickByRefRefusal(tool, parsed.data, bridge.lastHello?.version);
-      if (refusal) throw new Error(refusal);
-      const result = await bridge.sendTool(tool, parsed.data, def.timeoutMs);
+      const result = await bridge.sendTool(tool, prepareCall(tool, parsed.data, bridge.lastHello?.version), def.timeoutMs);
       const promiseNote = unawaitedPromiseNote(tool, parsed.data, result, bridge.lastHello?.version);
       if (promiseNote) result.text = `{}\n${promiseNote}`;
       results.push({ step: i + 1, tool, ok: true, result });
