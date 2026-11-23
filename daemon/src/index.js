@@ -319,6 +319,12 @@ async function runDoctor(config) {
       note = ` — the daemon is v${health.version}; Chrome updates the extension from the Web Store on its own, or click Update on chrome://extensions`;
     }
     console.log(`✓ Chrome extension connected (v${health.extensionVersion || "unknown"}${unpacked ? ", unpacked" : ", Web Store"})${note}`);
+    if (health.otherBrowser) {
+      console.log(
+        "! Another Chrome profile (or a second Chrome) has TaskWindow installed and keeps trying to connect. The one that connected first stays; " +
+          "to use the other one, close this browser or switch TaskWindow off in it"
+      );
+    }
   } else if (installedVersion) {
     console.log(`✗ Chrome extension not connected — unpacked files are v${installedVersion} at ${extensionInstallDir()}; enable it in Chrome, then run: taskwindow pair`);
   } else {
@@ -553,6 +559,7 @@ const server = http.createServer(async (req, res) => {
       extensionConnected: bridge.connected,
       extensionVersion: bridge.lastHello?.version || null,
       extensionId: bridge.lastHello?.id || null,
+      otherBrowser: bridge.otherBrowser,
       port: config.port,
     });
     return;
