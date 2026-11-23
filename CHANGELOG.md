@@ -3,6 +3,23 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.19
+
+### Fixed
+
+**`javascript_execute` waits for a Promise the script returns.** A script whose
+value was a Promise, such as `fetch(url).then(r => r.json())`, an async
+function call or `new Promise(...)`, came back as `{}` with no error. Only a
+top-level `await` was waited for, although `awaitPromise` is on by default, so
+an agent read the `{}` as an empty page. The Promise is now waited for and its
+value returned. One that rejects is an error naming the reason, and with
+`awaitPromise: false` the answer is `Promise` instead of `{}`.
+
+The fix is in the extension, which Chrome updates from the Web Store on its own
+schedule. Until that update arrives, a daemon from this release adds a note to
+every `{}` an older extension returns: it may be a Promise that was not waited
+for, and a top-level `await` in front of the expression gets the value.
+
 ## 0.2.18
 
 ### Fixed
