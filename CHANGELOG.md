@@ -3,6 +3,32 @@
 The section matching a release tag becomes that release's notes on GitHub, so
 write these for users. Add the version's section before tagging.
 
+## 0.2.20
+
+### Fixed
+
+**Two browsers with TaskWindow no longer take the connection from each other.**
+The daemon talks to one browser at a time, and until now the newest connection
+always won. With TaskWindow in two Chrome profiles, or in a second Chrome
+started next to the first, each one reconnected a second after losing the
+connection, so it changed hands about once a second. Tool calls landed in
+whichever browser held it at that moment: an agent was told its own tabs were
+not in its session, on tabs it had just opened.
+
+The browser that is connected now keeps its place for as long as it answers. A
+second one is refused and keeps retrying quietly in the background, and takes
+over only when the first has gone away. `taskwindow_status` and
+`taskwindow doctor` say when another browser is being refused. To move
+TaskWindow to the other browser, close the connected one or switch TaskWindow
+off in it.
+
+This is a daemon change and works with the extension Chrome already has. The
+refused profile's popup still only says "Not connected".
+
+**A replaced connection no longer cancels calls sent to the new one.** When a
+dead connection gave way to a new one, the old socket closing later failed
+every call in flight, although those calls belonged to the new connection.
+
 ## 0.2.19
 
 ### Fixed

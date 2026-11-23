@@ -499,6 +499,13 @@ export function registerTools(server, { bridge, version, updates = null, logger 
               latestVersion: updates?.latest ?? null,
               extensionConnected: connected,
               extensionVersion: bridge.lastHello?.version || null,
+              ...(bridge.otherBrowser
+                ? {
+                    otherBrowser:
+                      "Another Chrome profile (or a second Chrome) has TaskWindow installed and keeps trying to connect. " +
+                      "It is refused: your tabs stay in the browser that connected first. To use the other one, close this browser or switch TaskWindow off in it.",
+                  }
+                : {}),
               recovery: connected
                 ? null
                 : "Open Chrome and enable TaskWindow. If it remains disconnected, run `taskwindow doctor`, then `taskwindow pair`.",
